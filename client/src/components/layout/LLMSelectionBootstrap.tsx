@@ -34,6 +34,12 @@ export default function LLMSelectionBootstrap() {
     },
   });
 
+  const isMobileDeepSeekOnly = import.meta.env.VITE_MOBILE_BUILD === "true";
+  const mobileProviderConfigs = useMemo(() => {
+    const providers = apiKeySettingsQuery.data?.data ?? [];
+    return isMobileDeepSeekOnly ? providers.filter((item) => item.provider === "deepseek") : providers;
+  }, [apiKeySettingsQuery.data?.data, isMobileDeepSeekOnly]);
+
   const resolvedSelection = useMemo(() => {
     if (store.hasHydratedSelection) {
       return null;
@@ -46,11 +52,11 @@ export default function LLMSelectionBootstrap() {
       return null;
     }
     if (savedSelection && apiKeySettingsQuery.isError) {
-      return savedSelection;
+      return isMobileDeepSeekOnly && savedSelection.provider !== "deepseek" ? null : savedSelection;
     }
     return resolvePreferredLLMSelection(
       savedSelection,
-      apiKeySettingsQuery.data?.data ?? [],
+      mobileProviderConfigs,
       {
         temperature: store.temperature,
         maxTokens: store.maxTokens,
@@ -59,6 +65,8 @@ export default function LLMSelectionBootstrap() {
   }, [
     apiKeySettingsQuery.data?.data,
     apiKeySettingsQuery.isError,
+    isMobileDeepSeekOnly,
+    mobileProviderConfigs,
     apiKeySettingsQuery.isSuccess,
     selectionQuery.data?.data,
     selectionQuery.isError,

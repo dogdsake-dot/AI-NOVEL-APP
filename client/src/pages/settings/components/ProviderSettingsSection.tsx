@@ -48,6 +48,7 @@ export default function ProviderSettingsSection(props: {
     removingProvider,
   } = props;
   const [isAddProviderOpen, setIsAddProviderOpen] = useState(false);
+  const isMobileDeepSeekOnly = import.meta.env.VITE_MOBILE_BUILD === "true";
   const balanceMap = new Map(balances.map((item) => [item.provider, item]));
   const viewModels: ProviderCardViewModel[] = providers.map((provider) => {
     const balance = balanceMap.get(provider.provider);
@@ -68,7 +69,13 @@ export default function ProviderSettingsSection(props: {
     };
   });
   const visibleViewModels = useMemo(
-    () => viewModels.filter(({ provider }) => provider.isConfigured && provider.isActive),
+    () => isMobileDeepSeekOnly
+      ? viewModels.filter(({ provider }) => provider.provider === "deepseek")
+      : viewModels.filter(({ provider }) => provider.isConfigured && provider.isActive),
+    [isMobileDeepSeekOnly, viewModels],
+  );
+  const availableConnectionCount = useMemo(
+    () => viewModels.filter(({ provider }) => provider.isConfigured && provider.isActive).length,
     [viewModels],
   );
   const addableBuiltIns = providers.filter((provider) => provider.kind === "builtin" && (!provider.isConfigured || !provider.isActive));
@@ -82,19 +89,21 @@ export default function ProviderSettingsSection(props: {
           </div>
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <CardTitle>模型厂商</CardTitle>
-              <Badge variant={visibleViewModels.length ? "default" : "outline"}>{visibleViewModels.length} 个可用连接</Badge>
+              <CardTitle>{isMobileDeepSeekOnly ? "DeepSeek 模型" : "模型厂商"}</CardTitle>
+              <Badge variant={availableConnectionCount ? "default" : "outline"}>{availableConnectionCount} 个可用连接</Badge>
             </div>
           <CardDescription className={AUTO_DIRECTOR_MOBILE_CLASSES.wrapText}>
               添加一个可用文本模型后就能开始创作；路由和高级参数可按需再设置。
           </CardDescription>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button className={AUTO_DIRECTOR_MOBILE_CLASSES.fullWidthAction} onClick={() => setIsAddProviderOpen(true)}>
-            <Plus className="h-4 w-4" /> 添加厂商
-          </Button>
-        </div>
+        {!isMobileDeepSeekOnly ? (
+          <div className="flex flex-wrap gap-2">
+            <Button className={AUTO_DIRECTOR_MOBILE_CLASSES.fullWidthAction} onClick={() => setIsAddProviderOpen(true)}>
+              <Plus className="h-4 w-4" /> 添加厂商
+            </Button>
+          </div>
+        ) : null}
       </CardHeader>
       <CardContent className="grid min-w-0 gap-4 pt-5 md:grid-cols-2">
         {visibleViewModels.map((item) => (

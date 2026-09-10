@@ -67,7 +67,11 @@ export default function SettingsPage() {
     queryFn: getProviderBalances,
   });
 
-  const providerConfigs = useMemo(() => apiKeySettingsQuery.data?.data ?? [], [apiKeySettingsQuery.data?.data]);
+  const isMobileDeepSeekOnly = import.meta.env.VITE_MOBILE_BUILD === "true";
+  const providerConfigs = useMemo(() => {
+    const providers = apiKeySettingsQuery.data?.data ?? [];
+    return isMobileDeepSeekOnly ? providers.filter((item) => item.provider === "deepseek") : providers;
+  }, [apiKeySettingsQuery.data?.data, isMobileDeepSeekOnly]);
   const editingConfig = useMemo(
     () => providerConfigs.find((item) => item.provider === editingProvider),
     [editingProvider, providerConfigs],

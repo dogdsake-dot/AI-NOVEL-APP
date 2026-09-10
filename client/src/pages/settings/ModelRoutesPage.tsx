@@ -110,7 +110,11 @@ export default function ModelRoutesPage() {
     },
   });
 
-  const providerConfigs = useMemo(() => apiKeySettingsQuery.data?.data ?? [], [apiKeySettingsQuery.data?.data]);
+  const isMobileDeepSeekOnly = import.meta.env.VITE_MOBILE_BUILD === "true";
+  const providerConfigs = useMemo(() => {
+    const providers = apiKeySettingsQuery.data?.data ?? [];
+    return isMobileDeepSeekOnly ? providers.filter((item) => item.provider === "deepseek") : providers;
+  }, [apiKeySettingsQuery.data?.data, isMobileDeepSeekOnly]);
   const modelRoutes = modelRoutesQuery.data?.data;
   const modelRouteConnectivity = modelRouteConnectivityQuery.data?.data;
   const structuredFallback = structuredFallbackQuery.data?.data;
@@ -231,7 +235,9 @@ export default function ModelRoutesPage() {
     return {
       enabled: structuredFallback?.enabled ?? false,
       provider: structuredFallback?.provider ?? "deepseek",
-      model: structuredFallback?.model ?? "deepseek-chat",
+      model: structuredFallback?.model === "deepseek-chat" || structuredFallback?.model === "deepseek-reasoner"
+        ? "deepseek-v4-flash"
+        : structuredFallback?.model ?? "deepseek-v4-flash",
       temperature: structuredFallback != null ? String(structuredFallback.temperature) : "0.2",
       maxTokens: structuredFallback?.maxTokens != null ? String(structuredFallback.maxTokens) : "",
       requestProtocol: "auto",
