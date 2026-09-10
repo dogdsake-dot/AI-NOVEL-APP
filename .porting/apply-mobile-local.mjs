@@ -21,12 +21,14 @@ const apiAdapter = read(".porting/mobile-api-adapter.ts")
 write("client/src/mobile/localRuntime.ts", localRuntime);
 write("client/src/mobile/apiAdapter.ts", apiAdapter);
 write("client/src/mobile/extensions.ts", read(".porting/mobile-local-extensions.ts"));
+write("client/src/mobile/workflowAdapter.ts", read(".porting/mobile-workflow-adapter.ts"));
 write("client/src/api/client.ts", read(".porting/mobile-client.ts"));
 
 // Replace the old mobile server-address bootstrap with a local runtime marker.
 let html = read("client/index.html");
 html = html.replace(/\n\s*<!-- AI-NOVEL-APP mobile runtime adapter: start -->[\s\S]*?<!-- AI-NOVEL-APP mobile runtime adapter: end -->\n?/m, "\n");
-const marker = `\n    <!-- AI-NOVEL-APP local-first mobile runtime: start -->\n    <script>\n      (() => {\n        if (\"%VITE_MOBILE_BUILD%\" !== \"true\") return;\n        window.__AI_NOVEL_RUNTIME__ = {\n          ...(window.__AI_NOVEL_RUNTIME__ || {}),\n          mode: \"web\",\n          localFirst: true,\n          apiBaseUrl: \"local://api\",\n          isPackaged: true,\n          updateChannel: \"mobile\"\n        };\n      })();\n    </script>\n    <!-- AI-NOVEL-APP local-first mobile runtime: end -->`;
+const marker = `\n    <!-- AI-NOVEL-APP local-first mobile runtime: start -->\n    <script>\n      (() => {\n        if (\"%VITE_MOBILE_BUILD%\" !== \"true\") return;\n        window.__AI_NOVEL_RUNTIME__ = {\n          ...(window.__AI_NOVEL_RUNTIME__ || {}),\n          mode: \"web\",\n          localFirst: true,\n          apiBaseUrl: \"local://api\",\n          isPackaged: true,
+          updateChannel: \"mobile\"\n        };\n      })();\n    </script>\n    <!-- AI-NOVEL-APP local-first mobile runtime: end -->`;
 if (!html.includes("AI-NOVEL-APP local-first mobile runtime: start")) {
   html = html.replace(
     "    <title>AI 小说创作工作台 | AI Novel Production Engine</title>",
