@@ -9,6 +9,7 @@ import {
 
 const DEEPSEEK_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"];
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+const CORE_ROUTE_COUNT = 9;
 
 function parseBody(raw: unknown) {
   if (raw == null || raw === "") return {};
@@ -50,6 +51,8 @@ function providerStatus() {
     defaultImageModel: null,
     defaultBaseURL: DEEPSEEK_BASE_URL,
     requiresApiKey: true,
+    configured,
+    active: true,
     isConfigured: configured,
     isActive: true,
     reasoningEnabled: true,
@@ -59,6 +62,80 @@ function providerStatus() {
     concurrencyLimit: 0,
     requestIntervalMs: 0,
     supportsImageGeneration: false,
+  };
+}
+
+function quickSetupStatus() {
+  const provider = providerStatus();
+  const configured = provider.configured;
+  return {
+    readyForCreation: configured,
+    providers: [{
+      id: "deepseek",
+      kind: "builtin",
+      name: "DeepSeek",
+      requiresApiKey: true,
+      configured,
+      active: true,
+      currentModel: provider.currentModel,
+      defaultModel: provider.defaultModel,
+      currentBaseURL: DEEPSEEK_BASE_URL,
+      defaultBaseURL: DEEPSEEK_BASE_URL,
+      models: DEEPSEEK_MODELS,
+    }],
+    selectedProvider: configured ? "deepseek" : null,
+    selectedModel: configured ? provider.currentModel : null,
+    routeCoverage: {
+      configured: configured ? CORE_ROUTE_COUNT : 0,
+      total: CORE_ROUTE_COUNT,
+      missingTaskTypes: [],
+    },
+    blockingReasons: configured ? [] : ["请先配置 DeepSeek API Key。"],
+    recommendedAction: configured ? "start_creating" : "configure_provider",
+  };
+}
+
+function emptyTaskOverview() {
+  return {
+    queuedCount: 0,
+    runningCount: 0,
+    failedCount: 0,
+    cancelledCount: 0,
+    waitingApprovalCount: 0,
+    recoveryCandidateCount: 0,
+  };
+}
+
+function firstNovelStatus() {
+  const configured = getDeepSeekApiKeyStatus();
+  return {
+    graduated: false,
+    currentMilestone: configured ? "idea_direction" : "environment",
+    completedCount: configured ? 1 : 0,
+    totalCount: 5,
+    headline: configured ? "从一个故事想法开始" : "先连接 DeepSeek",
+    description: configured
+      ? "写下一段画面、人物或冲突，AI 会帮你整理成可执行的创作方向。"
+      : "Android 本地版只需要配置 DeepSeek API Key，不需要服务器地址。",
+    reason: configured ? "模型环境已就绪。" : "尚未配置 DeepSeek API Key。",
+    primaryAction: configured
+      ? { label: "开始第一本小说", route: "/create", kind: "navigate" }
+      : { label: "配置 DeepSeek", route: "/settings/models", kind: "open_quick_setup" },
+    novel: null,
+    directorTask: null,
+    firstReadableChapter: null,
+    milestones: [
+      { key: "environment", title: "创作环境", description: "配置 DeepSeek API。", status: configured ? "completed" : "current" },
+      { key: "idea_direction", title: "故事方向", description: "把想法整理成创作方向。", status: configured ? "current" : "pending" },
+      { key: "preparation", title: "创作准备", description: "准备人物、世界观和结构。", status: "pending" },
+      { key: "production_choice", title: "生产方式", description: "选择短篇或长篇生产链。", status: "pending" },
+      { key: "first_chapter", title: "首章/成稿", description: "生成第一份可阅读正文。", status: "pending" },
+    ],
+    optionalEnhancements: [
+      { key: "knowledge", title: "知识库", description: "补充作品参考资料。", route: "/knowledge" },
+      { key: "style", title: "写作风格", description: "配置写作风格资产。", route: "/style-engine" },
+      { key: "image", title: "视觉资产", description: "管理作品视觉资料。", route: "/novels" },
+    ],
   };
 }
 
@@ -83,6 +160,38 @@ export const mobileApiAdapter: AxiosAdapter = async (config) => {
   const path = pathOf(config);
   const method = String(config.method || "get").toLowerCase();
   const body = parseBody(config.data);
+
+  // First-screen bootstrap must never depend on the old Express server or call DeepSeek.
+  if (path === "/settings/quick-setup/status" && method === "get") {
+    return ok(config, quickSetupStatus());
+  }
+  if (path === "/settings/quick-setup/complete" && method === "post") {
+    const key = String(body.apiKey || localStorage.getItem("ai-novel.mobile.deepseek.api-key") || "").trim();
+    const model = String(body.model || getDeepSeekModel()).trim() || "deepseek-v4-pro";
+    if (!key) throw new Error("请填写 DeepSeek API Key。");
+    await probeDeepSeek(key, model);
+    setDeepSeekApiKey(key);
+    setDeepSeekModel(model);
+    return ok(config, {
+      status: quickSetupStatus(),
+      provider: "deepseek",
+      model,
+      plainConnectionReady: true,
+      structuredConnectionReady: true,
+    });
+  }
+  if (path === "/onboarding/first-novel" && method === "get") {
+    return ok(config, firstNovelStatus());
+  }
+  if (path === "/tasks/overview" && method === "get") {
+    return ok(config, emptyTaskOverview());
+  }
+  if (path === "/tasks" && method === "get") {
+    return ok(config, { items: [], nextCursor: null });
+  }
+  if (path === "/tasks/recovery-candidates" && method === "get") {
+    return ok(config, { items: [] });
+  }
 
   if (path === "/settings/api-keys" && method === "get") {
     return ok(config, [providerStatus()]);
