@@ -10,8 +10,15 @@ const write = (p, content) => {
 };
 
 // Restore the local-first runtime files after rsync --delete refreshes client/ from upstream.
-write("client/src/mobile/localRuntime.ts", 'export * from "../../../.porting/mobile-local-runtime";\n');
-write("client/src/mobile/apiAdapter.ts", 'export * from "../../../.porting/mobile-api-adapter";\n');
+// Copy the source into the client package instead of re-exporting files from .porting/.
+// This keeps TypeScript/module resolution inside client/, where axios/idb-keyval are installed.
+const localRuntime = read(".porting/mobile-local-runtime.ts")
+  .replace("export const localApiAdapter: AxiosAdapter = async (config) => {", "export const localApiAdapter: AxiosAdapter = async (config: AxiosRequestConfig) => {")
+  .replace("const current = getDeepSeekApiKey();", "const current = getDeepSeekKey();");
+const apiAdapter = read(".porting/mobile-api-adapter.ts")
+  .replace("export const mobileApiAdapter: AxiosAdapter = async (config) => {", "export const mobileApiAdapter: AxiosAdapter = async (config: AxiosRequestConfig) => {");
+write("client/src/mobile/localRuntime.ts", localRuntime);
+write("client/src/mobile/apiAdapter.ts", apiAdapter);
 write("client/src/api/client.ts", read(".porting/mobile-client.ts"));
 
 // Replace the old mobile server-address bootstrap with a local runtime marker.
