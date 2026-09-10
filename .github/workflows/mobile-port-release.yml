@@ -138,7 +138,12 @@ jobs:
         run: |
           set -euo pipefail
           TAG="v$MOBILE_VERSION"
-          NOTES="Android mobile port of ExplosiveCoderflome/AI-Novel-Writing-Assistant. Upstream commit: $UPSTREAM_SHA. Core React/Express/Prisma/LangGraph/RAG functionality is retained; Electron-only Windows shell features are excluded. The APK connects to the original server over LAN/HTTPS. License: AGPL-3.0-only. This is a debug-signed installable test prerelease."
+          LEGACY_TAG="v0.4.19-mobile.1"
+          if [ "$TAG" = "v0.1.0" ]; then
+            gh release delete "$LEGACY_TAG" --yes --cleanup-tag 2>/dev/null || true
+            git push origin ":refs/tags/$LEGACY_TAG" 2>/dev/null || true
+          fi
+          NOTES="AI-NOVEL-APP initial Android port release. Mobile app version: $MOBILE_VERSION. Synchronized from ExplosiveCoderflome/AI-Novel-Writing-Assistant upstream commit: $UPSTREAM_SHA. Core React/Express/Prisma/LangGraph/RAG functionality is retained; Electron-only Windows shell features are excluded. The APK connects to the original server over LAN/HTTPS. License: AGPL-3.0-only. This is a debug-signed installable test prerelease."
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
             "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk" \
