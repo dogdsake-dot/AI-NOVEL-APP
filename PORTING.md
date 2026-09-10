@@ -2,7 +2,7 @@
 
 - Upstream: https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant
 - Upstream desktop version at sync time: 0.4.19
-- Mobile port version: 0.1.0
+- Mobile port version: 0.2.0
 - Strategy: vendor upstream source, preserve all core business logic, add a Capacitor Android shell and the minimum compatibility patches needed for a packaged WebView.
 
 ## What is preserved

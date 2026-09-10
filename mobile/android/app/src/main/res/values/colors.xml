@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#17112C</color>
+    <color name="colorPrimaryDark">#090B16</color>
+    <color name="colorAccent">#57D7D0</color>
+    <color name="ai_novel_background">#090B16</color>
+    <color name="ai_novel_icon_background">#17112C</color>
+</resources>
