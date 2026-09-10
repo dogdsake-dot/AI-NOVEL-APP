@@ -16,6 +16,7 @@ const localRuntime = read(".porting/mobile-local-runtime.ts")
   .replace("export const localApiAdapter: AxiosAdapter = async (config) => {", "export const localApiAdapter: AxiosAdapter = async (config: AxiosRequestConfig) => {")
   .replace("const current = getDeepSeekApiKey();", "const current = getDeepSeekKey();");
 const apiAdapter = read(".porting/mobile-api-adapter.ts")
+  .replace('from "./mobile-local-runtime";', 'from "./localRuntime";')
   .replace("export const mobileApiAdapter: AxiosAdapter = async (config) => {", "export const mobileApiAdapter: AxiosAdapter = async (config: AxiosRequestConfig) => {");
 write("client/src/mobile/localRuntime.ts", localRuntime);
 write("client/src/mobile/apiAdapter.ts", apiAdapter);
