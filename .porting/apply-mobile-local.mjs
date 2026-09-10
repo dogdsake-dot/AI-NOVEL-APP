@@ -13,11 +13,11 @@ const write = (p, content) => {
 // Copy the source into the client package instead of re-exporting files from .porting/.
 // This keeps TypeScript/module resolution inside client/, where axios/idb-keyval are installed.
 const localRuntime = read(".porting/mobile-local-runtime.ts")
-  .replace("export const localApiAdapter: AxiosAdapter = async (config) => {", "export const localApiAdapter: AxiosAdapter = async (config: AxiosRequestConfig) => {")
+  .replace("export const localApiAdapter: AxiosAdapter = async (config) => {", "export const localApiAdapter: AxiosAdapter = async (config: any) => {")
   .replace("const current = getDeepSeekApiKey();", "const current = getDeepSeekKey();");
 const apiAdapter = read(".porting/mobile-api-adapter.ts")
   .replace('from "./mobile-local-runtime";', 'from "./localRuntime";')
-  .replace("export const mobileApiAdapter: AxiosAdapter = async (config) => {", "export const mobileApiAdapter: AxiosAdapter = async (config: AxiosRequestConfig) => {");
+  .replace("export const mobileApiAdapter: AxiosAdapter = async (config) => {", "export const mobileApiAdapter: AxiosAdapter = async (config: any) => {");
 write("client/src/mobile/localRuntime.ts", localRuntime);
 write("client/src/mobile/apiAdapter.ts", apiAdapter);
 write("client/src/api/client.ts", read(".porting/mobile-client.ts"));
