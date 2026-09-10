@@ -1,4 +1,5 @@
-bootstrap=9
+bootstrap=10
 upstream=ExplosiveCoderflome/AI-Novel-Writing-Assistant
 release_line=mobile
+runtime=local-first-deepseek
 signing=pinned-aosp-testkey
