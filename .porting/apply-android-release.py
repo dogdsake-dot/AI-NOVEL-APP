@@ -102,7 +102,7 @@ logo_vector = '''<?xml version="1.0" encoding="utf-8"?>
     logo_vector.replace('android:width="144dp" android:height="144dp"', 'android:width="108dp" android:height="108dp"')
 )
 
-(drawable / "splash.xml").write_text('''<?xml version="1.0" encoding="utf-8"?>
+(drawable / "ai_novel_splash.xml").write_text('''<?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/ai_novel_background"/>
     <item android:gravity="center" android:width="144dp" android:height="144dp" android:drawable="@drawable/ai_novel_logo"/>
@@ -125,7 +125,7 @@ styles = '''<?xml version="1.0" encoding="utf-8"?>
         <item name="windowSplashScreenBackground">@color/ai_novel_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ai_novel_logo</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-        <item name="android:background">@drawable/splash</item>
+        <item name="android:background">@drawable/ai_novel_splash</item>
     </style>
 </resources>
 '''
