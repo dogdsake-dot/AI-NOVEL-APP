@@ -10,6 +10,7 @@ Android is now a local-first build of the upstream AI Novel Production Engine UI
 - Provider scope: DeepSeek only on Android.
 - Models: deepseek-v4-pro and deepseek-v4-flash.
 - Configuration: enter the DeepSeek API Key in the mobile DeepSeek control/settings.
+- Creation Studio: idea interpretation, direction regeneration, confirmation, project creation and short-story draft state are persisted locally.
 
 The upstream server source remains vendored for desktop/upstream parity, but the Android runtime does not depend on that server.
 

@@ -12911,7 +12911,7 @@ snapshots:
 
   node-abi@3.87.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.4
 
   node-abi@4.28.0:
     dependencies:

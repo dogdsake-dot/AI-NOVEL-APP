@@ -11,7 +11,7 @@ The original React client, Express server, Prisma database layer, LangChain/Lang
 
 ## Mobile-specific differences
 
-Android is local-first: no server address is requested and the app does not require the upstream Express service at runtime. CRUD/project state is persisted locally and AI-oriented API calls are handled by the DeepSeek-only mobile adapter. The desktop/server source is still retained in the repository for upstream parity and non-Android builds. Electron-only capabilities remain desktop-only.
+Android is local-first: no server address is requested and the app does not require the upstream Express service at runtime. CRUD/project state, core novel workflow state, and Creation Studio task state are persisted locally; AI-oriented API calls are handled by the DeepSeek-only mobile adapter. The desktop/server source is still retained in the repository for upstream parity and non-Android builds. Electron-only capabilities remain desktop-only.
 
 ## License and attribution
 
