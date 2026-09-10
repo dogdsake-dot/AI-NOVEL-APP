@@ -84,6 +84,7 @@ jobs:
           PY
 
           node .porting/apply-mobile-port.mjs
+          node .porting/apply-mobile-deepseek.mjs
           printf 'UPSTREAM_SHA=%s\n' "$UPSTREAM_SHA" >> "$GITHUB_ENV"
           printf 'MOBILE_VERSION=%s\n' "$(cat MOBILE_VERSION)" >> "$GITHUB_ENV"
 
@@ -234,20 +235,24 @@ jobs:
           cat > /tmp/release-notes.md <<EOF
           # AI-NOVEL-APP $TAG
 
-          Android v0.2.0 starts the simplified fixed-signature sideload release line.
+          Android $TAG keeps the fixed-signature sideload release line and improves mobile model configuration.
 
           - Package ID remains \`com.dogdsake.ainovelapp\`.
-          - Uses one pinned, reproducible AOSP development/test certificate for this and future simplified builds.
+          - Android model-provider UI is simplified to DeepSeek only.
+          - DeepSeek is shown directly in mobile settings even before the first API Key is configured.
+          - Quick Setup, the global model selector, and mobile model-route selectors are constrained to DeepSeek.
+          - Legacy \`deepseek-chat\` / \`deepseek-reasoner\` structured fallback values are migrated to \`deepseek-v4-flash\`.
+          - The synchronized \`server/\` remains the upstream backend plus Android/Capacitor compatibility, and retains its generic provider architecture for desktop/server compatibility.
+          - Uses the same pinned AOSP development/test certificate as v0.2.0, so v0.2.0 can update in place.
           - No GitHub Repository Secrets are required.
           - Includes branded launcher/adaptive icons and branded splash screen.
           - Includes signed APK and signed AAB, SHA-256 checksums, and APK certificate report.
           - Synchronized from \`ExplosiveCoderflome/AI-Novel-Writing-Assistant\` at upstream commit \`$UPSTREAM_SHA\`.
-          - Original React/Express/Prisma/LangGraph/RAG functionality remains retained; Electron-only Windows shell features are excluded.
           - License: AGPL-3.0-only.
 
           ## Signing / upgrade note
 
-          v0.1.0 used a different debug certificate, so uninstall v0.1.0 once before installing v0.2.0. From v0.2.0 onward, builds produced by this workflow keep the same certificate and can update in place.
+          v0.1.0 used a different debug certificate, so a device still on v0.1.0 must uninstall it once before installing this release. v0.2.0 and later builds produced by this workflow keep the same certificate and can update in place.
 
           This simplified certificate is a public AOSP test identity, not a private production identity. Anyone can obtain the same test key and produce an APK with the same signing certificate. It is suitable for personal sideload/development convenience, not for a security-sensitive public production distribution.
           EOF
