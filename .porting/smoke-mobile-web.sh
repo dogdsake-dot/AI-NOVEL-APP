@@ -33,17 +33,33 @@ sleep 1
   --dump-dom "http://127.0.0.1:${PORT}/" \
   >"$DOM_FILE" 2>"$CHROME_LOG"
 
-if grep -q 'data-testid="app-startup-shell"' "$DOM_FILE"; then
-  echo "Mobile startup smoke test failed: startup shell never yielded to React." >&2
+# Do not grep for fallback copy such as "AI Novel 启动失败" across the whole
+# document: that text intentionally exists in the inline diagnostic source.
+# The runtime instead exposes state on <html> only after React actually commits.
+if grep -Eq '<html[^>]*data-ai-novel-fatal="true"' "$DOM_FILE"; then
+  echo "Mobile startup smoke test failed: runtime marked a fatal startup error." >&2
+  python3 - <<'PY' >&2 || true
+from pathlib import Path
+import re
+html = Path('/tmp/ai-novel-mobile-smoke-dom.html').read_text(errors='replace')
+m = re.search(r'<div id="root"[^>]*>([\s\S]*?)</div>\s*<script', html)
+print((m.group(1) if m else html)[-5000:])
+PY
+  tail -n 80 "$CHROME_LOG" >&2 || true
+  exit 33
+fi
+
+if ! grep -Eq '<html[^>]*data-ai-novel-mounted="react"' "$DOM_FILE"; then
+  echo "Mobile startup smoke test failed: React never reported a committed UI." >&2
+  tail -n 120 "$DOM_FILE" >&2 || true
   tail -n 80 "$CHROME_LOG" >&2 || true
   exit 32
 fi
 
-if grep -q 'AI Novel 启动失败' "$DOM_FILE"; then
-  echo "Mobile startup smoke test failed: fatal startup fallback was rendered." >&2
-  grep -A8 -B3 'AI Novel 启动失败' "$DOM_FILE" >&2 || true
-  tail -n 80 "$CHROME_LOG" >&2 || true
-  exit 33
+if grep -q 'class="app-startup-shell"' "$DOM_FILE"; then
+  echo "Mobile startup smoke test failed: startup shell still exists after React mount." >&2
+  tail -n 120 "$DOM_FILE" >&2 || true
+  exit 35
 fi
 
 if ! grep -Eq 'DeepSeek|创作|作品|小说' "$DOM_FILE"; then
@@ -53,4 +69,4 @@ if ! grep -Eq 'DeepSeek|创作|作品|小说' "$DOM_FILE"; then
   exit 34
 fi
 
-echo "Mobile startup smoke test passed: React replaced the startup shell and rendered application UI."
+echo "Mobile startup smoke test passed: React committed and rendered application UI."
