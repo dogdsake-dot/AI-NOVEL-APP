@@ -1,4 +1,4 @@
-bootstrap=7
+bootstrap=8
 upstream=ExplosiveCoderflome/AI-Novel-Writing-Assistant
 release_line=mobile
 signing=pinned-aosp-testkey
