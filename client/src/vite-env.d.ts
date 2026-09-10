@@ -13,6 +13,7 @@ interface Window {
   __AI_NOVEL_RUNTIME__?: {
     mode?: "web" | "desktop";
     apiBaseUrl?: string;
+    localFirst?: boolean;
     apiTimeoutMs?: number | string;
     isPackaged?: boolean;
     appVersion?: string;
