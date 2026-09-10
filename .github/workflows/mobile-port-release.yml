@@ -62,6 +62,7 @@ jobs:
             --exclude=.github \
             --exclude=.porting \
             --exclude=.mobile-port-ready \
+            --exclude=ANDROID_RELEASE.md \
             /tmp/ai-novel-upstream/ ./
 
           python3 - <<'PY'
@@ -131,36 +132,68 @@ jobs:
             git push origin HEAD:main
           fi
 
-      - name: Validate release signing secrets
+      # Simplified sideload signing line, matching the operational model used by
+      # Abyss Journal: one pinned development certificate is reused forever.
+      # Unlike Abyss Journal's private-repo keystore, this public repository does
+      # not store a private key. Instead CI reconstructs the well-known AOSP test
+      # key from an immutable upstream commit. This is intentionally NOT a secure
+      # production identity; anyone can obtain the same AOSP test private key.
+      - name: Prepare pinned development signing identity
         shell: bash
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!name:-}" ]; then
-              echo "Missing required GitHub Actions secret: $name" >&2
-              echo "See ANDROID_RELEASE.md and scripts/configure-android-signing.ps1" >&2
-              exit 2
-            fi
-          done
-          KEYSTORE_FILE="$RUNNER_TEMP/ai-novel-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
-          keytool -list \
-            -keystore "$KEYSTORE_FILE" \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" >/dev/null
-          printf 'AI_NOVEL_RELEASE_STORE_FILE=%s\n' "$KEYSTORE_FILE" >> "$GITHUB_ENV"
+          AOSP_BUILD_COMMIT='045a3d6a3e359633a14853a5a5e1e4f2a11cbdae'
+          BASE_URL="https://raw.githubusercontent.com/aosp-mirror/platform_build/$AOSP_BUILD_COMMIT/target/product/security"
+          PK8="$RUNNER_TEMP/ai-novel-testkey.pk8"
+          CERT="$RUNNER_TEMP/ai-novel-testkey.x509.pem"
+          PEM="$RUNNER_TEMP/ai-novel-testkey.pem"
+          P12="$RUNNER_TEMP/ai-novel-testkey.p12"
+          KEYSTORE_FILE="$RUNNER_TEMP/ai-novel-development.jks"
 
-      - name: Build signed release APK and AAB
+          curl -fsSL --retry 3 "$BASE_URL/testkey.pk8" -o "$PK8"
+          curl -fsSL --retry 3 "$BASE_URL/testkey.x509.pem" -o "$CERT"
+
+          EXPECTED_CERT='A4:0D:A8:0A:59:D1:70:CA:A9:50:CF:15:C1:8C:45:4D:47:A3:9B:26:98:9D:8B:64:0E:CD:74:5B:A7:1B:F5:DC'
+          ACTUAL_CERT="$(openssl x509 -in "$CERT" -noout -fingerprint -sha256 | sed 's/^.*=//')"
+          if [ "$ACTUAL_CERT" != "$EXPECTED_CERT" ]; then
+            echo "Pinned AOSP development certificate validation failed: $ACTUAL_CERT" >&2
+            exit 2
+          fi
+
+          openssl pkcs8 -inform DER -nocrypt -in "$PK8" -out "$PEM"
+          openssl pkcs12 -export \
+            -in "$CERT" \
+            -inkey "$PEM" \
+            -out "$P12" \
+            -name androiddebugkey \
+            -passout pass:android
+
+          keytool -importkeystore -noprompt \
+            -srckeystore "$P12" \
+            -srcstoretype PKCS12 \
+            -srcstorepass android \
+            -srcalias androiddebugkey \
+            -destkeystore "$KEYSTORE_FILE" \
+            -deststoretype JKS \
+            -deststorepass android \
+            -destkeypass android \
+            -destalias androiddebugkey
+
+          KEYSTORE_CERT="$(keytool -list -v -keystore "$KEYSTORE_FILE" -storepass android -alias androiddebugkey | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -n 1)"
+          if [ "$KEYSTORE_CERT" != "$EXPECTED_CERT" ]; then
+            echo "Reconstructed keystore certificate mismatch: $KEYSTORE_CERT" >&2
+            exit 3
+          fi
+
+          printf 'AI_NOVEL_RELEASE_STORE_FILE=%s\n' "$KEYSTORE_FILE" >> "$GITHUB_ENV"
+          printf 'AI_NOVEL_EXPECTED_CERT=%s\n' "$EXPECTED_CERT" >> "$GITHUB_ENV"
+
+      - name: Build fixed-signature release APK and AAB
         shell: bash
         env:
-          AI_NOVEL_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          AI_NOVEL_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          AI_NOVEL_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          AI_NOVEL_RELEASE_STORE_PASSWORD: android
+          AI_NOVEL_RELEASE_KEY_ALIAS: androiddebugkey
+          AI_NOVEL_RELEASE_KEY_PASSWORD: android
         run: |
           set -euo pipefail
           cd mobile/android
@@ -177,20 +210,21 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           if [ -z "$APKSIGNER" ]; then
             echo 'apksigner not found' >&2
-            exit 3
+            exit 4
           fi
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee dist/APK_SIGNATURE.txt
 
-          EXPECTED_CERT='58:6D:14:84:E0:C5:87:67:28:8F:B8:BD:BE:85:9E:C6:BF:F6:C6:B8:C0:22:64:F2:1A:3C:AA:A3:C5:42:06:E4'
-          ACTUAL_CERT="$(keytool -list -v -keystore "$AI_NOVEL_RELEASE_STORE_FILE" -storepass "$AI_NOVEL_RELEASE_STORE_PASSWORD" -alias "$AI_NOVEL_RELEASE_KEY_ALIAS" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
-          if [ "$ACTUAL_CERT" != "$EXPECTED_CERT" ]; then
-            echo "Unexpected Android release certificate fingerprint: $ACTUAL_CERT" >&2
-            exit 4
+          APK_CERT="$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^.*Signer.*certificate SHA-256 digest: //p' | head -n 1 | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_COMPACT="$(printf '%s' "$AI_NOVEL_EXPECTED_CERT" | tr -d ':')"
+          APK_COMPACT="$(printf '%s' "$APK_CERT" | tr -d ':[:space:]')"
+          if [ "$APK_COMPACT" != "$EXPECTED_COMPACT" ]; then
+            echo "Built APK certificate does not match the pinned development identity: $APK_CERT" >&2
+            exit 5
           fi
 
           sha256sum "$APK" "$AAB" > "dist/AI-NOVEL-APP-v$MOBILE_VERSION.sha256"
 
-      - name: Publish stable GitHub Release
+      - name: Publish GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -200,19 +234,22 @@ jobs:
           cat > /tmp/release-notes.md <<EOF
           # AI-NOVEL-APP $TAG
 
-          First long-term signed Android release of AI-NOVEL-APP.
+          Android v0.2.0 starts the simplified fixed-signature sideload release line.
 
           - Package ID remains \`com.dogdsake.ainovelapp\`.
-          - Persistent release certificate starts with v0.2.0 and will be reused for future Android releases.
+          - Uses one pinned, reproducible AOSP development/test certificate for this and future simplified builds.
+          - No GitHub Repository Secrets are required.
           - Includes branded launcher/adaptive icons and branded splash screen.
           - Includes signed APK and signed AAB, SHA-256 checksums, and APK certificate report.
           - Synchronized from \`ExplosiveCoderflome/AI-Novel-Writing-Assistant\` at upstream commit \`$UPSTREAM_SHA\`.
           - Original React/Express/Prisma/LangGraph/RAG functionality remains retained; Electron-only Windows shell features are excluded.
           - License: AGPL-3.0-only.
 
-          ## Upgrade note
+          ## Signing / upgrade note
 
-          v0.1.0 was debug-signed. Android does not allow an APK signed with the new v0.2.0 release certificate to overwrite that debug-signed installation. If v0.1.0 is installed, uninstall it once before installing v0.2.0. From v0.2.0 onward, normal in-place upgrades work as long as the same release signing key is preserved.
+          v0.1.0 used a different debug certificate, so uninstall v0.1.0 once before installing v0.2.0. From v0.2.0 onward, builds produced by this workflow keep the same certificate and can update in place.
+
+          This simplified certificate is a public AOSP test identity, not a private production identity. Anyone can obtain the same test key and produce an APK with the same signing certificate. It is suitable for personal sideload/development convenience, not for a security-sensitive public production distribution.
           EOF
 
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
