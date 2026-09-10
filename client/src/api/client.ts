@@ -2,7 +2,8 @@ import axios, { AxiosError } from "axios";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { API_BASE_URL, API_TIMEOUT_MS } from "@/lib/constants";
 import { toast } from "@/components/ui/toast";
-import { installDeepSeekQuickSettings, localApiAdapter } from "@/mobile/localRuntime";
+import { installDeepSeekQuickSettings } from "@/mobile/localRuntime";
+import { mobileApiAdapter } from "@/mobile/apiAdapter";
 
 export interface ApiHttpError extends Error {
   status?: number;
@@ -22,7 +23,7 @@ const isMobileLocalRuntime =
 export const apiClient = axios.create({
   baseURL: isMobileLocalRuntime ? "local://api" : API_BASE_URL,
   timeout: API_TIMEOUT_MS,
-  ...(isMobileLocalRuntime ? { adapter: localApiAdapter } : {}),
+  ...(isMobileLocalRuntime ? { adapter: mobileApiAdapter } : {}),
 });
 
 if (isMobileLocalRuntime && typeof document !== "undefined") {
