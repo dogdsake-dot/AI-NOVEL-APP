@@ -143,6 +143,7 @@ jobs:
           for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [ -z "${!name:-}" ]; then
               echo "Missing required GitHub Actions secret: $name" >&2
+              echo "See ANDROID_RELEASE.md and scripts/configure-android-signing.ps1" >&2
               exit 2
             fi
           done
@@ -179,6 +180,14 @@ jobs:
             exit 3
           fi
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee dist/APK_SIGNATURE.txt
+
+          EXPECTED_CERT='58:6D:14:84:E0:C5:87:67:28:8F:B8:BD:BE:85:9E:C6:BF:F6:C6:B8:C0:22:64:F2:1A:3C:AA:A3:C5:42:06:E4'
+          ACTUAL_CERT="$(keytool -list -v -keystore "$AI_NOVEL_RELEASE_STORE_FILE" -storepass "$AI_NOVEL_RELEASE_STORE_PASSWORD" -alias "$AI_NOVEL_RELEASE_KEY_ALIAS" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          if [ "$ACTUAL_CERT" != "$EXPECTED_CERT" ]; then
+            echo "Unexpected Android release certificate fingerprint: $ACTUAL_CERT" >&2
+            exit 4
+          fi
+
           sha256sum "$APK" "$AAB" > "dist/AI-NOVEL-APP-v$MOBILE_VERSION.sha256"
 
       - name: Publish stable GitHub Release
@@ -188,7 +197,24 @@ jobs:
         run: |
           set -euo pipefail
           TAG="v$MOBILE_VERSION"
-          NOTES="AI-NOVEL-APP $TAG is the first long-term signed Android release. It keeps package id com.dogdsake.ainovelapp for upgrade compatibility, uses a persistent release signing certificate, includes branded launcher/adaptive icon and splash resources, and remains synchronized with ExplosiveCoderflome/AI-Novel-Writing-Assistant at upstream commit $UPSTREAM_SHA. Core React/Express/Prisma/LangGraph/RAG functionality is retained; Electron-only Windows shell features are excluded. License: AGPL-3.0-only."
+          cat > /tmp/release-notes.md <<EOF
+          # AI-NOVEL-APP $TAG
+
+          First long-term signed Android release of AI-NOVEL-APP.
+
+          - Package ID remains \`com.dogdsake.ainovelapp\`.
+          - Persistent release certificate starts with v0.2.0 and will be reused for future Android releases.
+          - Includes branded launcher/adaptive icons and branded splash screen.
+          - Includes signed APK and signed AAB, SHA-256 checksums, and APK certificate report.
+          - Synchronized from \`ExplosiveCoderflome/AI-Novel-Writing-Assistant\` at upstream commit \`$UPSTREAM_SHA\`.
+          - Original React/Express/Prisma/LangGraph/RAG functionality remains retained; Electron-only Windows shell features are excluded.
+          - License: AGPL-3.0-only.
+
+          ## Upgrade note
+
+          v0.1.0 was debug-signed. Android does not allow an APK signed with the new v0.2.0 release certificate to overwrite that debug-signed installation. If v0.1.0 is installed, uninstall it once before installing v0.2.0. From v0.2.0 onward, normal in-place upgrades work as long as the same release signing key is preserved.
+          EOF
+
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
             "dist/AI-NOVEL-APP-v$MOBILE_VERSION-release.apk" \
@@ -196,5 +222,5 @@ jobs:
             "dist/AI-NOVEL-APP-v$MOBILE_VERSION.sha256" \
             "dist/APK_SIGNATURE.txt" \
             --title "AI-NOVEL-APP $TAG" \
-            --notes "$NOTES" \
+            --notes-file /tmp/release-notes.md \
             --latest
