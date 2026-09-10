@@ -41,6 +41,13 @@ jobs:
       - name: Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Android branding renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends librsvg2-bin
+
       - name: Sync upstream and apply mobile overlay
         shell: bash
         run: |
@@ -89,7 +96,7 @@ jobs:
           pnpm --filter @ai-novel/shared build
           AI_NOVEL_CLIENT_BASE=relative VITE_MOBILE_BUILD=true pnpm --filter @ai-novel/client build
 
-      - name: Generate Android project
+      - name: Generate branded Android project
         shell: bash
         run: |
           set -euo pipefail
@@ -97,17 +104,22 @@ jobs:
             pnpm --dir mobile exec cap add android
           fi
           pnpm --dir mobile exec cap sync android
-          python3 - <<'PY'
-          from pathlib import Path
-          import os, re
-          p = Path('mobile/android/app/build.gradle')
-          text = p.read_text()
-          text = re.sub(r'versionCode\s+\d+', 'versionCode 1', text)
-          text = re.sub(r'versionName\s+"[^"]+"', 'versionName "' + os.environ['MOBILE_VERSION'] + '"', text)
-          p.write_text(text)
-          PY
+          python3 .porting/apply-android-release.py
 
-      - name: Commit synchronized source
+          while IFS=: read -r density size; do
+            out="mobile/android/app/src/main/res/mipmap-$density"
+            mkdir -p "$out"
+            rsvg-convert -w "$size" -h "$size" .porting/branding/app-icon.svg -o "$out/ic_launcher.png"
+            cp "$out/ic_launcher.png" "$out/ic_launcher_round.png"
+          done <<'EOF'
+          mdpi:48
+          hdpi:72
+          xhdpi:96
+          xxhdpi:144
+          xxxhdpi:192
+          EOF
+
+      - name: Commit synchronized source and Android branding
         shell: bash
         run: |
           set -euo pipefail
@@ -115,39 +127,74 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "chore: sync upstream $UPSTREAM_SHA and Android port $MOBILE_VERSION"
+            git commit -m "chore: sync upstream $UPSTREAM_SHA and prepare Android $MOBILE_VERSION"
             git push origin HEAD:main
           fi
 
-      - name: Build APK
+      - name: Validate release signing secrets
         shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required GitHub Actions secret: $name" >&2
+              exit 2
+            fi
+          done
+          KEYSTORE_FILE="$RUNNER_TEMP/ai-novel-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+          keytool -list \
+            -keystore "$KEYSTORE_FILE" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          printf 'AI_NOVEL_RELEASE_STORE_FILE=%s\n' "$KEYSTORE_FILE" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK and AAB
+        shell: bash
+        env:
+          AI_NOVEL_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          AI_NOVEL_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          AI_NOVEL_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           cd mobile/android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew clean assembleRelease bundleRelease --stacktrace
           cd ../..
-          mkdir -p dist
-          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk"
-          sha256sum "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk" > "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk.sha256"
 
-      - name: Publish GitHub prerelease
+          mkdir -p dist
+          APK="dist/AI-NOVEL-APP-v$MOBILE_VERSION-release.apk"
+          AAB="dist/AI-NOVEL-APP-v$MOBILE_VERSION-release.aab"
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "$APK"
+          cp mobile/android/app/build/outputs/bundle/release/app-release.aab "$AAB"
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo 'apksigner not found' >&2
+            exit 3
+          fi
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee dist/APK_SIGNATURE.txt
+          sha256sum "$APK" "$AAB" > "dist/AI-NOVEL-APP-v$MOBILE_VERSION.sha256"
+
+      - name: Publish stable GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="v$MOBILE_VERSION"
-          LEGACY_TAG="v0.4.19-mobile.1"
-          if [ "$TAG" = "v0.1.0" ]; then
-            gh release delete "$LEGACY_TAG" --yes --cleanup-tag 2>/dev/null || true
-            git push origin ":refs/tags/$LEGACY_TAG" 2>/dev/null || true
-          fi
-          NOTES="AI-NOVEL-APP initial Android port release. Mobile app version: $MOBILE_VERSION. Synchronized from ExplosiveCoderflome/AI-Novel-Writing-Assistant upstream commit: $UPSTREAM_SHA. Core React/Express/Prisma/LangGraph/RAG functionality is retained; Electron-only Windows shell features are excluded. The APK connects to the original server over LAN/HTTPS. License: AGPL-3.0-only. This is a debug-signed installable test prerelease."
+          NOTES="AI-NOVEL-APP $TAG is the first long-term signed Android release. It keeps package id com.dogdsake.ainovelapp for upgrade compatibility, uses a persistent release signing certificate, includes branded launcher/adaptive icon and splash resources, and remains synchronized with ExplosiveCoderflome/AI-Novel-Writing-Assistant at upstream commit $UPSTREAM_SHA. Core React/Express/Prisma/LangGraph/RAG functionality is retained; Electron-only Windows shell features are excluded. License: AGPL-3.0-only."
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk" \
-            "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk.sha256" \
+            "dist/AI-NOVEL-APP-v$MOBILE_VERSION-release.apk" \
+            "dist/AI-NOVEL-APP-v$MOBILE_VERSION-release.aab" \
+            "dist/AI-NOVEL-APP-v$MOBILE_VERSION.sha256" \
+            "dist/APK_SIGNATURE.txt" \
             --title "AI-NOVEL-APP $TAG" \
             --notes "$NOTES" \
-            --prerelease
+            --latest
