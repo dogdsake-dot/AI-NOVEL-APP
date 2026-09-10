@@ -138,7 +138,8 @@ async function deepSeekJson(path: string, method: string, payload: unknown, cont
     },
     body: JSON.stringify({
       model: getDeepSeekModel(),
-      thinking: { type: "enabled", reasoning_effort: "high" },
+      thinking: { type: "enabled" },
+      reasoning_effort: "high",
       response_format: { type: "json_object" },
       messages: [
         {
