@@ -26,7 +26,16 @@ function formatStartupError(error: unknown): string {
   try { return JSON.stringify(error); } catch { return String(error); }
 }
 
+function markFatalStartup() {
+  document.documentElement.dataset.aiNovelFatal = "true";
+  delete document.documentElement.dataset.aiNovelMounted;
+}
+
 function StartupFailure({ error }: { error: unknown }) {
+  React.useEffect(() => {
+    markFatalStartup();
+  }, []);
+
   return (
     <main style={{ minHeight: "100vh", padding: 24, background: "#090b16", color: "#f3f4f6", fontFamily: "sans-serif" }}>
       <div style={{ maxWidth: 760, margin: "48px auto", padding: 20, border: "1px solid #334155", borderRadius: 16, background: "#111827" }}>
@@ -57,6 +66,7 @@ class StartupErrorBoundary extends Component<{ children: ReactNode }, { error: u
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
+    markFatalStartup();
     console.error("[AI-NOVEL-APP] React startup error", error, info.componentStack);
   }
 
@@ -66,11 +76,24 @@ class StartupErrorBoundary extends Component<{ children: ReactNode }, { error: u
   }
 }
 
+function StartupMountedMarker({ children }: { children: ReactNode }) {
+  React.useEffect(() => {
+    document.documentElement.dataset.aiNovelMounted = "react";
+    delete document.documentElement.dataset.aiNovelFatal;
+    return () => {
+      delete document.documentElement.dataset.aiNovelMounted;
+    };
+  }, []);
+
+  return children;
+}
+
 function installBlankScreenGuard() {
   const renderFallback = (error: unknown) => {
     window.setTimeout(() => {
       const root = document.getElementById("root");
       if (!root || root.textContent?.trim()) return;
+      markFatalStartup();
       root.replaceChildren();
       const wrapper = document.createElement("div");
       wrapper.style.cssText = "min-height:100vh;padding:24px;background:#090b16;color:#f3f4f6;font-family:sans-serif";
@@ -100,18 +123,20 @@ if (!rootElement) throw new Error("Missing #root element.");
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <StartupErrorBoundary>
-      <ThemeProvider>
-        <QueryClientProvider client={queryClient}>
-          <AppRouterProvider>
-            <DesktopBootstrapBoundary>
-              <ServerStartupGate>
-                <AppRouter />
-              </ServerStartupGate>
-            </DesktopBootstrapBoundary>
-            <Toaster />
-          </AppRouterProvider>
-        </QueryClientProvider>
-      </ThemeProvider>
+      <StartupMountedMarker>
+        <ThemeProvider>
+          <QueryClientProvider client={queryClient}>
+            <AppRouterProvider>
+              <DesktopBootstrapBoundary>
+                <ServerStartupGate>
+                  <AppRouter />
+                </ServerStartupGate>
+              </DesktopBootstrapBoundary>
+              <Toaster />
+            </AppRouterProvider>
+          </QueryClientProvider>
+        </ThemeProvider>
+      </StartupMountedMarker>
     </StartupErrorBoundary>
   </React.StrictMode>,
 );
