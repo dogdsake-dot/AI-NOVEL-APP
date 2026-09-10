@@ -8,7 +8,7 @@ const config: CapacitorConfig = {
     CapacitorHttp: {
       enabled: true,
     },
-  },
+  }
 };
 
 export default config;

@@ -6,7 +6,7 @@ Android is now a local-first build of the upstream AI Novel Production Engine UI
 
 - UI: upstream React client, preserved as the primary product surface.
 - Local data: stored in the app WebView IndexedDB.
-- AI: direct DeepSeek API calls from the packaged app.
+- AI: direct DeepSeek API calls from the packaged app through Capacitor native HTTP.
 - Provider scope: DeepSeek only on Android.
 - Models: deepseek-v4-pro and deepseek-v4-flash.
 - Configuration: enter the DeepSeek API Key in the mobile DeepSeek control/settings.

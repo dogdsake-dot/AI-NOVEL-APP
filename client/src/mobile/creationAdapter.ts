@@ -3,10 +3,8 @@ import { get, set } from "idb-keyval";
 import { mobileWorkflowApiAdapter } from "./workflowAdapter";
 
 const DB_KEY = "ai-novel.mobile.local-db.v1";
-const WRITING_PLATFORMS = new Set([
-  "qidian", "tomato", "jjwxc", "qimao", "zhihu", "mdxbook",
-  "general_male", "general_female", "short_story", "other",
-]);
+const WRITING_PLATFORMS = new Set(["fanqie_free", "qidian_male", "jinjiang_female", "zhihu_story"]);
+const REVISION_STRATEGIES = new Set(["local_patch", "rewrite_downstream", "full_replan"]);
 
 interface LocalDb {
   version: 1;
@@ -97,82 +95,114 @@ function asStringArray(value: unknown) {
     : [];
 }
 
-function normalizeNarrativeForm(value: unknown, fallback: "short_story" | "long_novel" = "long_novel") {
+function asNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function normalizeNarrativeForm(value: unknown, fallback: "short_story" | "long_novel" = "short_story") {
   return value === "short_story" || value === "long_novel" ? value : fallback;
 }
 
-function normalizePlatform(value: unknown, fallback = "qidian") {
+function normalizeTargetWordCount(form: "short_story" | "long_novel", value: unknown, fallback?: number) {
+  const base = asNumber(value, fallback ?? (form === "short_story" ? 8000 : 200000));
+  return form === "short_story" ? clamp(base, 3000, 30000) : clamp(base, 50000, 3_000_000);
+}
+
+function normalizePlatform(value: unknown, fallback = "fanqie_free") {
   return typeof value === "string" && WRITING_PLATFORMS.has(value) ? value : fallback;
 }
 
-function normalizeDirection(raw: any, index: number, interpretation: any) {
+function normalizeConfidence(value: unknown, fallback = 0.75) {
+  const number = asNumber(value, fallback);
+  return Math.min(1, Math.max(0, number));
+}
+
+function normalizeDirection(raw: any, index: number, seed: { idea: string; understanding: string }) {
   const defaults = index === 0
     ? {
         title: "主线推进",
-        summary: interpretation.expandedIdea,
-        coreConflict: interpretation.coreConflict,
-        whyItWorks: "围绕核心冲突直接推进，保证主线清晰并快速建立阅读期待。",
-        protagonistPath: interpretation.protagonistWish,
-        endingDirection: "完成主矛盾阶段性兑现，并为后续升级留下空间。",
+        premise: seed.understanding || seed.idea,
+        coreExperience: "目标明确、冲突持续升级，并在关键节点兑现阅读期待。",
+        protagonist: "一个必须主动改变现状、为选择承担代价的主角。",
+        centralConflict: "主角的核心目标与现实阻碍发生正面冲突。",
+        endingPromise: "核心矛盾得到阶段性兑现，同时留下人物改变后的余韵。",
+        styleKeywords: ["强冲突", "清晰主线", "人物驱动"],
       }
     : {
         title: "反转强化",
-        summary: `在“${interpretation.expandedIdea}”基础上强化误导、反转与代价。`,
-        coreConflict: interpretation.coreConflict,
-        whyItWorks: "通过认知差和代价升级制造更强的章节钩子与情绪波动。",
-        protagonistPath: interpretation.protagonistWish,
-        endingDirection: "以一次改变人物选择的反转收束当前阶段。",
+        premise: `围绕“${seed.idea}”强化信息差、误判和代价，让故事在关键节点发生方向变化。`,
+        coreExperience: "通过递进误导和反转制造更强钩子，同时保证反转来自人物选择。",
+        protagonist: "一个最初相信错误答案，随后被迫重构认知的主角。",
+        centralConflict: "表层目标与隐藏真相相互牵制，主角每次推进都付出新的代价。",
+        endingPromise: "以一次能改变人物未来选择的反转完成收束。",
+        styleKeywords: ["悬念", "反转", "情绪回报"],
       };
 
   return {
     id: asString(raw?.id, makeId(`direction_${index + 1}`)),
     title: asString(raw?.title, defaults.title),
-    summary: asString(raw?.summary, defaults.summary),
-    coreConflict: asString(raw?.coreConflict, defaults.coreConflict),
-    whyItWorks: asString(raw?.whyItWorks, defaults.whyItWorks),
-    protagonistPath: asString(raw?.protagonistPath, defaults.protagonistPath),
-    endingDirection: asString(raw?.endingDirection, defaults.endingDirection),
-    storyModeHint: asString(raw?.storyModeHint) || null,
-    commercialFocus: asString(raw?.commercialFocus) || null,
-    shortFormAdjustments: asStringArray(raw?.shortFormAdjustments),
+    premise: asString(raw?.premise, asString(raw?.summary, defaults.premise)),
+    coreExperience: asString(raw?.coreExperience, asString(raw?.whyItWorks, defaults.coreExperience)),
+    protagonist: asString(raw?.protagonist, asString(raw?.protagonistPath, defaults.protagonist)),
+    centralConflict: asString(raw?.centralConflict, asString(raw?.coreConflict, defaults.centralConflict)),
+    endingPromise: asString(raw?.endingPromise, asString(raw?.endingDirection, defaults.endingPromise)),
+    styleKeywords: asStringArray(raw?.styleKeywords).length
+      ? asStringArray(raw?.styleKeywords)
+      : (asStringArray(raw?.shortFormAdjustments).length ? asStringArray(raw?.shortFormAdjustments).slice(0, 5) : defaults.styleKeywords),
   };
 }
 
 function normalizeInterpretation(raw: any, request: Record<string, any>, previous?: any) {
   const source = raw?.interpretation && typeof raw.interpretation === "object" ? raw.interpretation : (raw || {});
-  const idea = asString(request.idea, asString(previous?.expandedIdea, "待完善的故事构想"));
-  const explicitForm = request.preferredNarrativeForm === "short_story" || request.preferredNarrativeForm === "long_novel"
-    ? request.preferredNarrativeForm
-    : undefined;
-  const fallbackForm = explicitForm ?? normalizeNarrativeForm(previous?.recommendedNarrativeForm, "long_novel");
-  const fallbackPlatform = normalizePlatform(request.preferredWritingPlatform, normalizePlatform(previous?.recommendedWritingPlatform, "qidian"));
+  const idea = asString(request.idea, asString(previous?.understanding, "待完善的故事构想"));
+  const requestedForm = request.preferredNarrativeForm ?? request.narrativeForm;
+  const form = normalizeNarrativeForm(
+    source.recommendedNarrativeForm,
+    normalizeNarrativeForm(requestedForm, normalizeNarrativeForm(previous?.recommendedNarrativeForm, "short_story")),
+  );
+  const targetWordCount = normalizeTargetWordCount(
+    form,
+    source.recommendedTargetWordCount ?? request.targetWordCount,
+    previous?.recommendedTargetWordCount,
+  );
+  const platformPreference = request.writingPlatformPreference;
+  const explicitPlatform = typeof platformPreference === "string" && platformPreference !== "ai_recommend"
+    ? normalizePlatform(platformPreference)
+    : null;
+  const platform = explicitPlatform
+    ?? normalizePlatform(source.recommendedWritingPlatform, normalizePlatform(previous?.recommendedWritingPlatform, "fanqie_free"));
+  const understanding = asString(
+    source.understanding,
+    asString(source.expandedIdea, asString(previous?.understanding, idea)),
+  );
 
   const interpretation: any = {
-    expandedIdea: asString(source.expandedIdea, asString(previous?.expandedIdea, idea)),
-    coreConflict: asString(source.coreConflict, asString(previous?.coreConflict, "主角的核心目标与阻碍发生正面冲突。")),
-    protagonistWish: asString(source.protagonistWish, asString(previous?.protagonistWish, "主角希望改变当前处境并获得关键目标。")),
-    coreSellingPoint: asString(source.coreSellingPoint, asString(previous?.coreSellingPoint)) || null,
-    competingFeel: asString(source.competingFeel, asString(previous?.competingFeel)) || null,
-    targetAudience: asString(source.targetAudience, asString(previous?.targetAudience)) || null,
-    first30ChapterPromise: asString(source.first30ChapterPromise, asString(previous?.first30ChapterPromise)) || null,
-    commercialTags: asStringArray(source.commercialTags).length ? asStringArray(source.commercialTags) : asStringArray(previous?.commercialTags),
-    genreName: asString(source.genreName, asString(request.preferredGenreName, asString(previous?.genreName, "综合"))),
-    worldType: asString(source.worldType, asString(request.preferredWorldType, asString(previous?.worldType, "原创世界"))),
-    toneKeywords: asStringArray(source.toneKeywords).length
-      ? asStringArray(source.toneKeywords)
-      : (asString(request.preferredTone) ? [asString(request.preferredTone)] : asStringArray(previous?.toneKeywords)),
-    storyModeHints: asStringArray(source.storyModeHints).length ? asStringArray(source.storyModeHints) : asStringArray(previous?.storyModeHints),
-    recommendedNarrativeForm: normalizeNarrativeForm(source.recommendedNarrativeForm, fallbackForm),
-    recommendedWritingPlatform: normalizePlatform(source.recommendedWritingPlatform, fallbackPlatform),
-    recommendedWritingMode: source.recommendedWritingMode === "continuation" ? "continuation" : (previous?.recommendedWritingMode === "continuation" ? "continuation" : "original"),
-    continuationContext: source.continuationContext ?? previous?.continuationContext ?? null,
+    understanding,
+    recommendedNarrativeForm: form,
+    recommendedTargetWordCount: targetWordCount,
+    confidence: normalizeConfidence(source.confidence, normalizeConfidence(previous?.confidence, 0.78)),
+    recommendationReason: asString(
+      source.recommendationReason,
+      asString(previous?.recommendationReason, `根据当前灵感的冲突密度与展开空间，建议先按${form === "short_story" ? "短篇" : "长篇"}规模推进。`),
+    ),
+    recommendedWritingPlatform: platform,
+    writingPlatformConfidence: normalizeConfidence(source.writingPlatformConfidence, normalizeConfidence(previous?.writingPlatformConfidence, 0.72)),
+    writingPlatformReason: asString(
+      source.writingPlatformReason,
+      asString(previous?.writingPlatformReason, "根据题材、目标篇幅和读者预期匹配当前平台。"),
+    ),
     directions: [],
   };
 
   const rawDirections = Array.isArray(source.directions) ? source.directions.slice(0, 2) : [];
   interpretation.directions = [
-    normalizeDirection(rawDirections[0], 0, interpretation),
-    normalizeDirection(rawDirections[1], 1, interpretation),
+    normalizeDirection(rawDirections[0], 0, { idea, understanding }),
+    normalizeDirection(rawDirections[1], 1, { idea, understanding }),
   ];
   return interpretation;
 }
@@ -187,20 +217,22 @@ function findTask(db: LocalDb, taskId: string) {
   return { tasks, index, task: index >= 0 ? tasks[index] : undefined };
 }
 
+function findTaskByNovel(db: LocalDb, novelId: string) {
+  return taskList(db).find((item) => item.novelId === novelId) ?? null;
+}
+
 function taskProjection(task: Record<string, any>) {
   return {
     taskId: task.taskId,
-    idea: task.idea,
     status: task.status,
-    stageLabel: task.stageLabel,
-    progress: task.progress,
-    currentAction: task.currentAction,
+    progress: Number(task.progress ?? 0),
+    currentAction: task.currentAction ?? null,
+    idea: task.idea,
     interpretation: task.interpretation ?? null,
     selectedDirectionId: task.selectedDirectionId ?? null,
-    narrativeForm: task.narrativeForm ?? null,
     novelId: task.novelId ?? null,
     productionTaskId: task.productionTaskId ?? null,
-    resumeRoute: task.resumeRoute ?? null,
+    resumeRoute: task.resumeRoute ?? "",
     error: task.error ?? null,
   };
 }
@@ -218,8 +250,35 @@ function extractAiData(response: any) {
   return response?.data?.data ?? response?.data ?? null;
 }
 
-function countTextWords(text: string) {
+function countWords(text: string) {
   return text.replace(/\s+/g, "").length;
+}
+
+function syncShortStoryChapter(db: LocalDb, novelId: string) {
+  const segments = nested(db, `novels:${novelId}:short-story-segments`).slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const continuousContent = segments.map((segment) => asString(segment.content)).filter(Boolean).join("\n\n");
+  const chapters = nested(db, `novels:${novelId}:chapters`);
+  let chapter = chapters.find((item) => Number(item.order || 0) === 1);
+  if (!chapter) {
+    chapter = {
+      id: makeId("chapter"),
+      novelId,
+      title: collection(db, "novels").find((item) => item.id === novelId)?.title || "短篇正文",
+      order: 1,
+      content: continuousContent,
+      expectation: "完整短篇正文",
+      chapterStatus: continuousContent ? "completed" : "pending_generation",
+      targetWordCount: segments.reduce((sum, item) => sum + Number(item.targetWordCount || 0), 0) || null,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    chapters.push(chapter);
+  } else {
+    chapter.content = continuousContent;
+    chapter.chapterStatus = continuousContent ? "completed" : "pending_generation";
+    chapter.updatedAt = now();
+  }
+  return chapter;
 }
 
 async function interpret(config: AxiosRequestConfig, body: Record<string, any>) {
@@ -231,17 +290,15 @@ async function interpret(config: AxiosRequestConfig, body: Record<string, any>) 
   const db = await loadDb();
   const task = {
     taskId: makeId("creation"),
-    idea,
     status: "waiting_approval",
-    stageLabel: "等待确认",
-    progress: 100,
+    progress: 1,
     currentAction: "已生成两个创作方向，请选择后继续。",
+    idea,
     interpretation,
     selectedDirectionId: null,
-    narrativeForm: null,
     novelId: null,
     productionTaskId: null,
-    resumeRoute: null,
+    resumeRoute: "",
     error: null,
     createdAt: now(),
     updatedAt: now(),
@@ -261,15 +318,14 @@ async function regenerate(config: AxiosRequestConfig, taskId: string, body: Reco
       ...body,
       idea: task.idea,
       previousInterpretation: task.interpretation,
-      instruction: "根据用户反馈重新生成完整 interpretation，必须包含恰好两个 directions。",
+      outputContract: "返回 CreationIntentInterpretation：understanding、recommendedNarrativeForm、recommendedTargetWordCount、confidence、recommendationReason、recommendedWritingPlatform、writingPlatformConfidence、writingPlatformReason，以及恰好两个 directions。每个 direction 包含 id/title/premise/coreExperience/protagonist/centralConflict/endingPromise/styleKeywords。",
     });
-    const interpretation = normalizeInterpretation(extractAiData(response), { idea: task.idea }, task.interpretation);
+    const interpretation = normalizeInterpretation(extractAiData(response), { ...body, idea: task.idea }, task.interpretation);
     tasks[index] = {
       ...task,
       status: "waiting_approval",
-      stageLabel: "等待确认",
-      progress: 100,
-      currentAction: "已按反馈重新生成两个创作方向。",
+      progress: 1,
+      currentAction: "已按新的作品规模和平台重新生成两个方向。",
       interpretation,
       selectedDirectionId: null,
       error: null,
@@ -284,36 +340,73 @@ async function regenerate(config: AxiosRequestConfig, taskId: string, body: Reco
   }
 }
 
-async function generateShortStory(config: AxiosRequestConfig, task: Record<string, any>, novel: Record<string, any>, direction: Record<string, any>) {
-  try {
-    const response = await delegateAi(config, `/novels/${novel.id}/chapters/short-story-draft/generate`, {
-      instruction: "基于给定灵感与方向生成一篇完整、可直接编辑的中文短篇小说。只返回 JSON，字段至少包含 title、content、summary、targetWordCount。content 必须是完整正文字符串，不要只给大纲。",
-      idea: task.idea,
-      interpretation: task.interpretation,
-      selectedDirection: direction,
-      narrativeForm: "short_story",
-      writingPlatform: novel.writingPlatform,
-      targetWordCount: 5000,
-    });
-    const generated = extractAiData(response) || {};
-    const chapterLike = generated.chapter && typeof generated.chapter === "object" ? generated.chapter : generated;
-    const content = asString(chapterLike.content, asString(chapterLike.text));
-    return {
-      title: asString(chapterLike.title, novel.title),
-      content,
-      summary: asString(chapterLike.summary, direction.summary),
-      targetWordCount: Number(chapterLike.targetWordCount) > 0 ? Number(chapterLike.targetWordCount) : 5000,
-      error: content ? null : "DeepSeek 未返回完整正文，可进入编辑页继续生成或手动编辑。",
-    };
-  } catch (error: any) {
-    return {
-      title: novel.title,
-      content: "",
-      summary: direction.summary,
-      targetWordCount: 5000,
-      error: error?.message || "短篇初稿生成失败，可进入编辑页重试。",
-    };
-  }
+async function generateShortStoryDraft(
+  config: AxiosRequestConfig,
+  task: Record<string, any>,
+  novel: Record<string, any>,
+  direction: Record<string, any>,
+  targetWordCount: number,
+) {
+  const response = await delegateAi(config, `/novels/${novel.id}/chapters/short-story-draft/generate`, {
+    instruction: "生成完整中文短篇小说正文。只返回 JSON：{title, content, summary}。content 必须是连续完整正文，不是提纲，不要省略结尾。",
+    originalIdea: task.idea,
+    understanding: task.interpretation?.understanding,
+    selectedDirection: direction,
+    targetWordCount,
+    writingPlatform: novel.writingPlatform,
+  });
+  const generated = extractAiData(response) || {};
+  const chapterLike = generated.chapter && typeof generated.chapter === "object" ? generated.chapter : generated;
+  const content = asString(chapterLike.content, asString(chapterLike.text));
+  if (!content) throw new Error("DeepSeek 未返回完整短篇正文。");
+  return {
+    title: asString(chapterLike.title, novel.title),
+    content,
+    summary: asString(chapterLike.summary, direction.premise),
+  };
+}
+
+function createShortStoryState(
+  db: LocalDb,
+  task: Record<string, any>,
+  novel: Record<string, any>,
+  direction: Record<string, any>,
+  draft: { title: string; content: string; summary: string } | null,
+  targetWordCount: number,
+  error: string | null,
+) {
+  const timestamp = now();
+  db.misc[`novels:${novel.id}:short-story-intent`] = {
+    id: makeId("intent"),
+    version: 1,
+    originalExpression: task.idea,
+    understanding: task.interpretation?.understanding || task.idea,
+    direction,
+  };
+  db.misc[`novels:${novel.id}:short-story-plan`] = {
+    id: makeId("short_plan"),
+    status: draft ? "completed" : "failed",
+    endingPromise: direction.endingPromise,
+    qualityDebt: error ? [error] : [],
+    schemaVersion: 1,
+  };
+
+  const segment = {
+    id: makeId("segment"),
+    order: 1,
+    content: draft?.content || "",
+    status: draft ? "completed" : "failed",
+    version: 1,
+    targetWordCount,
+    wordCount: countWords(draft?.content || ""),
+    humanEdited: false,
+    qualityResult: null,
+    updatedAt: timestamp,
+  };
+  db.nested[`novels:${novel.id}:short-story-segments`] = [segment];
+  const chapter = syncShortStoryChapter(db, novel.id);
+  if (draft?.title) chapter.title = draft.title;
+  if (draft?.summary) chapter.expectation = draft.summary;
 }
 
 async function confirm(config: AxiosRequestConfig, taskId: string, body: Record<string, any>) {
@@ -324,34 +417,48 @@ async function confirm(config: AxiosRequestConfig, taskId: string, body: Record<
   const interpretation = task.interpretation;
   if (!interpretation) fail(config, 409, "创作方向尚未生成。");
 
+  if (task.status === "succeeded" && task.novelId && task.confirmIdempotencyKey === body.idempotencyKey) {
+    return ok(config, {
+      taskId,
+      novelId: task.novelId,
+      productionTaskId: task.productionTaskId || taskId,
+      narrativeForm: task.narrativeForm,
+      resumeRoute: task.resumeRoute,
+    });
+  }
+
   const directions = Array.isArray(interpretation.directions) ? interpretation.directions : [];
   const direction = directions.find((item: any) => item.id === body.directionId) ?? directions[0];
   if (!direction) fail(config, 400, "请选择创作方向。");
 
   const narrativeForm = normalizeNarrativeForm(body.narrativeForm, normalizeNarrativeForm(interpretation.recommendedNarrativeForm));
+  const targetWordCount = normalizeTargetWordCount(narrativeForm, body.targetWordCount, interpretation.recommendedTargetWordCount);
   const writingPlatform = normalizePlatform(body.writingPlatform, normalizePlatform(interpretation.recommendedWritingPlatform));
   const timestamp = now();
   const novelId = makeId("novel");
+  const productionTaskId = makeId("production");
   const title = asString(direction.title, asString(task.idea).slice(0, 30) || "未命名作品");
   const novel: Record<string, any> = {
     id: novelId,
     title,
-    description: asString(direction.summary, interpretation.expandedIdea) || null,
-    targetAudience: interpretation.targetAudience ?? null,
-    bookSellingPoint: interpretation.coreSellingPoint ?? direction.whyItWorks ?? null,
-    competingFeel: interpretation.competingFeel ?? null,
-    first30ChapterPromise: interpretation.first30ChapterPromise ?? null,
-    commercialTags: asStringArray(interpretation.commercialTags),
+    description: direction.premise || interpretation.understanding || null,
+    targetAudience: null,
+    bookSellingPoint: direction.coreExperience || null,
+    competingFeel: null,
+    first30ChapterPromise: narrativeForm === "long_novel" ? direction.endingPromise : null,
+    commercialTags: direction.styleKeywords || [],
     status: "draft",
-    writingMode: interpretation.recommendedWritingMode === "continuation" ? "continuation" : "original",
-    projectMode: body.projectMode || "co_pilot",
+    writingMode: "original",
+    projectMode: "co_pilot",
     creationExperience: "professional",
     narrativeForm,
-    targetWordCount: narrativeForm === "short_story" ? 5000 : null,
+    targetWordCount,
+    derivedFromNovelId: null,
     writingPlatform,
+    writingPlatformProfileVersion: 1,
     narrativePov: null,
     pacePreference: null,
-    styleTone: asStringArray(interpretation.toneKeywords).join(" / ") || null,
+    styleTone: asStringArray(direction.styleKeywords).join(" / ") || null,
     emotionIntensity: null,
     aiFreedom: null,
     postGenerationStyleReviewEnabled: true,
@@ -361,7 +468,6 @@ async function confirm(config: AxiosRequestConfig, taskId: string, body: Record<
     storylineStatus: "not_started",
     outlineStatus: "not_started",
     resourceReadyScore: 0,
-    sourceNovelId: interpretation.continuationContext?.sourceNovelId ?? null,
     worldId: null,
     outline: null,
     structuredOutline: null,
@@ -375,35 +481,16 @@ async function confirm(config: AxiosRequestConfig, taskId: string, body: Record<
   collection(db, "novels").unshift(novel);
   await saveDb(db);
 
-  let shortStoryError: string | null = null;
+  let productionError: string | null = null;
   if (narrativeForm === "short_story") {
-    const draft = await generateShortStory(config, task, novel, direction);
+    let draft: { title: string; content: string; summary: string } | null = null;
+    try {
+      draft = await generateShortStoryDraft(config, task, novel, direction, targetWordCount);
+    } catch (error: any) {
+      productionError = error?.message || "短篇初稿生成失败，可从短篇工作台继续。";
+    }
     db = await loadDb();
-    const chapters = nested(db, `novels:${novelId}:chapters`);
-    const chapter = {
-      id: makeId("chapter"),
-      novelId,
-      title: draft.title,
-      order: 1,
-      content: draft.content,
-      expectation: draft.summary,
-      chapterStatus: draft.content ? "completed" : "pending_generation",
-      targetWordCount: draft.targetWordCount,
-      conflictLevel: null,
-      revealLevel: null,
-      mustAvoid: "",
-      taskSheet: "",
-      sceneCards: "",
-      repairHistory: "",
-      qualityScore: null,
-      continuityScore: null,
-      characterScore: null,
-      pacingScore: null,
-      riskFlags: "",
-      createdAt: now(),
-      updatedAt: now(),
-    };
-    chapters.push(chapter);
+    createShortStoryState(db, task, novel, direction, draft, targetWordCount, productionError);
     const novelIndex = collection(db, "novels").findIndex((item) => item.id === novelId);
     if (novelIndex >= 0) {
       collection(db, "novels")[novelIndex] = {
@@ -412,72 +499,250 @@ async function confirm(config: AxiosRequestConfig, taskId: string, body: Record<
         updatedAt: now(),
       };
     }
-    shortStoryError = draft.error;
   }
 
   const latest = findTask(db, taskId);
-  if (latest.index < 0) fail(config, 500, "创作任务状态丢失。");
-  const resumeRoute = `/novels/${novelId}/edit`;
+  if (!latest.task || latest.index < 0) fail(config, 500, "创作任务状态丢失。");
+  const resumeRoute = narrativeForm === "short_story" ? `/novels/${novelId}/story` : `/novels/${novelId}/edit`;
   latest.tasks[latest.index] = {
     ...latest.task,
-    status: "succeeded",
-    stageLabel: "已创建作品",
-    progress: 100,
+    status: productionError ? "failed" : "succeeded",
+    progress: productionError ? 0 : 1,
     currentAction: narrativeForm === "short_story"
-      ? (shortStoryError ? "短篇项目已创建，初稿未完整生成，可进入编辑页继续。" : "短篇初稿已生成，可进入编辑页继续修改。")
-      : "长篇项目已创建，可进入项目编辑页继续世界观、人物、卷章与生产流程。",
+      ? (productionError ? "短篇项目已创建，正文生成中断，可进入工作台重试。" : "短篇正文已生成，可进入工作台编辑。")
+      : "长篇项目已创建，可继续世界观、人物、卷章和生产流程。",
     selectedDirectionId: direction.id,
-    narrativeForm,
     novelId,
-    productionTaskId: null,
+    productionTaskId,
     resumeRoute,
-    error: shortStoryError,
+    narrativeForm,
+    confirmIdempotencyKey: body.idempotencyKey || null,
+    error: productionError,
     updatedAt: now(),
   };
   await saveDb(db);
 
-  return ok(config, {
-    taskId,
-    novelId,
-    productionTaskId: null,
-    narrativeForm,
-    resumeRoute,
-  });
+  return ok(config, { taskId, novelId, productionTaskId, narrativeForm, resumeRoute });
 }
 
-async function shortStoryProjection(config: AxiosRequestConfig, taskId: string) {
-  const db = await loadDb();
-  const { task } = findTask(db, taskId);
-  if (!task) fail(config, 404, "创作任务不存在。");
-  if (!task.novelId) fail(config, 409, "该任务尚未创建作品。");
-
-  const novel = collection(db, "novels").find((item) => item.id === task.novelId);
+function shortStoryProjectionFromDb(config: AxiosRequestConfig, db: LocalDb, novelId: string) {
+  const novel = collection(db, "novels").find((item) => item.id === novelId);
   if (!novel) fail(config, 404, "作品不存在。");
-  const chapter = nested(db, `novels:${task.novelId}:chapters`).slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0))[0] ?? null;
-  const content = asString(chapter?.content);
-  return ok(config, {
-    taskId,
+  const segments = nested(db, `novels:${novelId}:short-story-segments`).slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const task = findTaskByNovel(db, novelId);
+  const continuousContent = segments.map((segment) => asString(segment.content)).filter(Boolean).join("\n\n");
+  return {
     novel: {
       id: novel.id,
       title: novel.title,
-      description: novel.description ?? null,
-      narrativeForm: novel.narrativeForm,
-      writingPlatform: novel.writingPlatform,
-      projectStatus: novel.projectStatus ?? null,
-      storylineStatus: novel.storylineStatus ?? null,
-      outlineStatus: novel.outlineStatus ?? null,
+      narrativeForm: novel.narrativeForm || "short_story",
+      targetWordCount: Number(novel.targetWordCount || 8000),
+      derivedFromNovelId: novel.derivedFromNovelId ?? null,
+      writingPlatform: novel.writingPlatform ?? null,
+      writingPlatformProfileVersion: novel.writingPlatformProfileVersion ?? null,
     },
-    chapter,
-    planning: {
-      status: task.status === "failed" ? "failed" : (task.status === "succeeded" ? "succeeded" : "waiting_approval"),
-      progress: Number(task.progress || 0),
-      currentAction: task.currentAction || "",
-      error: task.error ?? null,
+    intent: db.misc[`novels:${novelId}:short-story-intent`] ?? null,
+    plan: db.misc[`novels:${novelId}:short-story-plan`] ?? null,
+    segments,
+    continuousContent,
+    production: {
+      taskId: task?.productionTaskId ?? task?.taskId ?? null,
+      status: task?.status ?? null,
+      progress: Number(task?.progress ?? (continuousContent ? 1 : 0)),
+      currentAction: task?.currentAction ?? null,
+      error: task?.error ?? null,
     },
-    totalWords: countTextWords(content),
-    targetWordCount: chapter?.targetWordCount ?? novel.targetWordCount ?? null,
-    readyToEdit: Boolean(chapter),
+  };
+}
+
+async function getShortStory(config: AxiosRequestConfig, novelId: string) {
+  const db = await loadDb();
+  return ok(config, shortStoryProjectionFromDb(config, db, novelId));
+}
+
+async function updateShortStorySegment(config: AxiosRequestConfig, novelId: string, segmentId: string, body: Record<string, any>) {
+  const db = await loadDb();
+  const segments = nested(db, `novels:${novelId}:short-story-segments`);
+  const index = segments.findIndex((item) => item.id === segmentId);
+  if (index < 0) fail(config, 404, "正文分段不存在。");
+  const current = segments[index];
+  const expectedVersion = Number(body.expectedVersion);
+  if (Number.isFinite(expectedVersion) && expectedVersion !== Number(current.version || 1)) {
+    fail(config, 409, "正文已被更新，请刷新后再保存。");
+  }
+  nested(db, `novels:${novelId}:short-story-segment-history`).unshift({
+    id: makeId("segment_history"), segmentId, version: current.version, content: current.content, createdAt: now(),
   });
+  const content = String(body.content ?? "");
+  segments[index] = {
+    ...current,
+    content,
+    status: "completed",
+    version: Number(current.version || 1) + 1,
+    wordCount: countWords(content),
+    humanEdited: true,
+    updatedAt: now(),
+  };
+  syncShortStoryChapter(db, novelId);
+  await saveDb(db);
+  return ok(config, { id: segmentId, content, version: segments[index].version });
+}
+
+async function previewRevision(config: AxiosRequestConfig, novelId: string, body: Record<string, any>) {
+  const db = await loadDb();
+  const projection = shortStoryProjectionFromDb(config, db, novelId);
+  const instruction = asString(body.instruction);
+  if (!instruction) fail(config, 400, "请输入修改要求。");
+  const response = await delegateAi(config, `/novels/${novelId}/short-story/revision-preview`, {
+    instruction,
+    novel: projection.novel,
+    intent: projection.intent,
+    plan: projection.plan,
+    segments: projection.segments.map((segment: any) => ({ id: segment.id, order: segment.order, content: segment.content })),
+    outputContract: "返回 JSON：understoodGoal, affectedSegmentIds, changesEnding, changesScale, changesCoreIntent, recommendedTargetWordCount, recommendedStrategy(local_patch|rewrite_downstream|full_replan), summary。",
+  });
+  const generated = extractAiData(response) || {};
+  const allIds = projection.segments.map((segment: any) => segment.id);
+  const affected = Array.isArray(generated.affectedSegmentIds)
+    ? generated.affectedSegmentIds.filter((id: any) => allIds.includes(id))
+    : [];
+  const impact = {
+    intentVersionId: makeId("revision_intent"),
+    understoodGoal: asString(generated.understoodGoal, instruction),
+    affectedSegmentIds: affected.length ? affected : allIds,
+    changesEnding: Boolean(generated.changesEnding),
+    changesScale: Boolean(generated.changesScale),
+    changesCoreIntent: Boolean(generated.changesCoreIntent),
+    recommendedTargetWordCount: normalizeTargetWordCount("short_story", generated.recommendedTargetWordCount, projection.novel.targetWordCount),
+    recommendedStrategy: REVISION_STRATEGIES.has(generated.recommendedStrategy) ? generated.recommendedStrategy : "local_patch",
+    summary: asString(generated.summary, "将按你的要求修改受影响正文，并保留未受影响内容。"),
+  };
+  nested(db, `novels:${novelId}:short-story-revisions`).unshift({ ...impact, instruction, createdAt: now(), status: "proposed" });
+  await saveDb(db);
+  return ok(config, impact);
+}
+
+async function applyRevision(config: AxiosRequestConfig, novelId: string, intentVersionId: string) {
+  const db = await loadDb();
+  const revisions = nested(db, `novels:${novelId}:short-story-revisions`);
+  const revisionIndex = revisions.findIndex((item) => item.intentVersionId === intentVersionId);
+  if (revisionIndex < 0) fail(config, 404, "修改预览已失效，请重新预览。");
+  const revision = revisions[revisionIndex];
+  const segments = nested(db, `novels:${novelId}:short-story-segments`);
+  const selected = segments.filter((segment) => revision.affectedSegmentIds.includes(segment.id));
+  if (!selected.length) fail(config, 409, "没有可修改的正文分段。");
+
+  const response = await delegateAi(config, `/novels/${novelId}/short-story/revisions/${intentVersionId}/rewrite`, {
+    instruction: revision.instruction,
+    strategy: revision.recommendedStrategy,
+    segments: selected.map((segment) => ({ id: segment.id, order: segment.order, content: segment.content })),
+    outputContract: "返回 JSON：{segments:[{id,content}]}，id 必须沿用输入 id，content 为修改后的完整正文。",
+  });
+  const generated = extractAiData(response) || {};
+  const generatedSegments = Array.isArray(generated.segments) ? generated.segments : [];
+  for (const segment of selected) {
+    const replacement = generatedSegments.find((item: any) => item.id === segment.id);
+    const content = asString(replacement?.content, selected.length === 1 ? asString(generated.content) : "");
+    if (!content) continue;
+    nested(db, `novels:${novelId}:short-story-segment-history`).unshift({
+      id: makeId("segment_history"), segmentId: segment.id, version: segment.version, content: segment.content, createdAt: now(),
+    });
+    const index = segments.findIndex((item) => item.id === segment.id);
+    segments[index] = {
+      ...segments[index],
+      content,
+      status: "completed",
+      version: Number(segments[index].version || 1) + 1,
+      wordCount: countWords(content),
+      updatedAt: now(),
+    };
+  }
+  revisions[revisionIndex] = { ...revision, status: "applied", appliedAt: now() };
+  const novel = collection(db, "novels").find((item) => item.id === novelId);
+  if (novel) novel.targetWordCount = revision.recommendedTargetWordCount;
+  syncShortStoryChapter(db, novelId);
+  await saveDb(db);
+  return ok(config, { taskId: makeId("revision_task") });
+}
+
+async function retryShortStory(config: AxiosRequestConfig, novelId: string) {
+  let db = await loadDb();
+  const novel = collection(db, "novels").find((item) => item.id === novelId);
+  if (!novel) fail(config, 404, "作品不存在。");
+  const task = findTaskByNovel(db, novelId);
+  if (!task) fail(config, 404, "创作任务不存在。");
+  const direction = db.misc[`novels:${novelId}:short-story-intent`]?.direction ?? task.interpretation?.directions?.[0];
+  if (!direction) fail(config, 409, "缺少短篇创作方向。");
+  const targetWordCount = normalizeTargetWordCount("short_story", novel.targetWordCount, 8000);
+
+  const taskIndex = taskList(db).findIndex((item) => item.taskId === task.taskId);
+  if (taskIndex >= 0) {
+    taskList(db)[taskIndex] = { ...task, status: "running", progress: 0.1, currentAction: "正在重新生成短篇正文…", error: null, updatedAt: now() };
+    await saveDb(db);
+  }
+
+  try {
+    const draft = await generateShortStoryDraft(config, task, novel, direction, targetWordCount);
+    db = await loadDb();
+    createShortStoryState(db, task, novel, direction, draft, targetWordCount, null);
+    const latestIndex = taskList(db).findIndex((item) => item.taskId === task.taskId);
+    if (latestIndex >= 0) taskList(db)[latestIndex] = { ...taskList(db)[latestIndex], status: "succeeded", progress: 1, currentAction: "短篇正文已重新生成。", error: null, updatedAt: now() };
+    await saveDb(db);
+    return ok(config, { taskId: task.productionTaskId || task.taskId });
+  } catch (error: any) {
+    db = await loadDb();
+    const latestIndex = taskList(db).findIndex((item) => item.taskId === task.taskId);
+    if (latestIndex >= 0) taskList(db)[latestIndex] = { ...taskList(db)[latestIndex], status: "failed", progress: 0, currentAction: "短篇生成中断，可再次重试。", error: error?.message || "生成失败", updatedAt: now() };
+    await saveDb(db);
+    throw error;
+  }
+}
+
+async function deriveLongForm(config: AxiosRequestConfig, novelId: string) {
+  const db = await loadDb();
+  const projection = shortStoryProjectionFromDb(config, db, novelId);
+  const baseIdea = projection.intent?.originalExpression || projection.intent?.understanding || projection.novel.title;
+  let interpretation: any;
+  try {
+    const response = await delegateAi(config, `/novels/${novelId}/short-story/derive-long-form`, {
+      instruction: "把当前短篇提炼为可扩展的长篇创作方向，返回 CreationIntentInterpretation，并提供恰好两个长篇 directions。不要直接改写原短篇。",
+      shortStory: projection,
+      preferredNarrativeForm: "long_novel",
+      targetWordCount: Math.max(100000, Number(projection.novel.targetWordCount || 8000) * 20),
+    });
+    interpretation = normalizeInterpretation(extractAiData(response), {
+      idea: baseIdea,
+      preferredNarrativeForm: "long_novel",
+      targetWordCount: Math.max(100000, Number(projection.novel.targetWordCount || 8000) * 20),
+      writingPlatformPreference: "fanqie_free",
+    });
+  } catch {
+    interpretation = normalizeInterpretation({}, {
+      idea: baseIdea,
+      preferredNarrativeForm: "long_novel",
+      targetWordCount: Math.max(100000, Number(projection.novel.targetWordCount || 8000) * 20),
+      writingPlatformPreference: "fanqie_free",
+    });
+  }
+  const taskId = makeId("creation");
+  taskList(db).unshift({
+    taskId,
+    status: "waiting_approval",
+    progress: 1,
+    currentAction: "已从短篇提炼出两个长篇扩展方向。",
+    idea: baseIdea,
+    interpretation,
+    selectedDirectionId: null,
+    novelId: null,
+    productionTaskId: null,
+    resumeRoute: `/create?taskId=${taskId}`,
+    error: null,
+    derivedFromNovelId: novelId,
+    createdAt: now(),
+    updatedAt: now(),
+  });
+  await saveDb(db);
+  return ok(config, { taskId, resumeRoute: `/create?taskId=${taskId}` });
 }
 
 export const mobileCreationApiAdapter: AxiosAdapter = async (config: any) => {
@@ -486,29 +751,30 @@ export const mobileCreationApiAdapter: AxiosAdapter = async (config: any) => {
   const body = parseBody(config.data);
   const parts = path.split("/").filter(Boolean);
 
-  if (parts[0] !== "creation-studio") return mobileWorkflowApiAdapter(config);
-
-  if (parts.length === 2 && parts[1] === "interpret" && method === "post") {
-    return interpret(config, body);
+  if (parts[0] === "creation-studio") {
+    if (parts.length === 2 && parts[1] === "interpret" && method === "post") return interpret(config, body);
+    if (parts.length >= 2 && parts[1] !== "interpret") {
+      const taskId = parts[1];
+      if (parts.length === 2 && method === "get") {
+        const db = await loadDb();
+        const { task } = findTask(db, taskId);
+        if (!task) fail(config, 404, "创作任务不存在。");
+        return ok(config, taskProjection(task));
+      }
+      if (parts.length === 3 && parts[2] === "regenerate" && method === "post") return regenerate(config, taskId, body);
+      if (parts.length === 3 && parts[2] === "confirm" && method === "post") return confirm(config, taskId, body);
+    }
+    return mobileWorkflowApiAdapter(config);
   }
 
-  if (parts.length >= 2 && parts[1] !== "interpret") {
-    const taskId = parts[1];
-    if (parts.length === 2 && method === "get") {
-      const db = await loadDb();
-      const { task } = findTask(db, taskId);
-      if (!task) fail(config, 404, "创作任务不存在。");
-      return ok(config, taskProjection(task));
-    }
-    if (parts.length === 3 && parts[2] === "regenerate" && method === "post") {
-      return regenerate(config, taskId, body);
-    }
-    if (parts.length === 3 && parts[2] === "confirm" && method === "post") {
-      return confirm(config, taskId, body);
-    }
-    if (parts.length === 3 && parts[2] === "short-story" && method === "get") {
-      return shortStoryProjection(config, taskId);
-    }
+  if (parts[0] === "novels" && parts[1] && parts[2] === "short-story") {
+    const novelId = parts[1];
+    if (parts.length === 3 && method === "get") return getShortStory(config, novelId);
+    if (parts.length === 4 && parts[3] === "retry" && method === "post") return retryShortStory(config, novelId);
+    if (parts.length === 5 && parts[3] === "segments" && method === "put") return updateShortStorySegment(config, novelId, parts[4], body);
+    if (parts.length === 4 && parts[3] === "revision-preview" && method === "post") return previewRevision(config, novelId, body);
+    if (parts.length === 6 && parts[3] === "revisions" && parts[5] === "apply" && method === "post") return applyRevision(config, novelId, parts[4]);
+    if (parts.length === 4 && parts[3] === "derive-long-form" && method === "post") return deriveLongForm(config, novelId);
   }
 
   return mobileWorkflowApiAdapter(config);
