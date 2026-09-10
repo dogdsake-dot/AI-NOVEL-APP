@@ -14,6 +14,6 @@
         <item name="windowSplashScreenBackground">@color/ai_novel_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ai_novel_logo</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-        <item name="android:background">@drawable/splash</item>
+        <item name="android:background">@drawable/ai_novel_splash</item>
     </style>
 </resources>
