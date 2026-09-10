@@ -1,4 +1,4 @@
-bootstrap=15
+bootstrap=16
 upstream=ExplosiveCoderflome/AI-Novel-Writing-Assistant
 release_line=mobile
 runtime=local-first-deepseek
