@@ -19,10 +19,12 @@ const localRuntime = read(".porting/mobile-local-runtime.ts")
 const apiAdapter = read(".porting/mobile-api-adapter.ts")
   .replace('from "./mobile-local-runtime";', 'from "./localRuntime";')
   .replace("export const mobileApiAdapter: AxiosAdapter = async (config) => {", "export const mobileApiAdapter: AxiosAdapter = async (config: any) => {");
+const workflowAdapter = read(".porting/mobile-workflow-adapter.ts")
+  .replace("  const normalized = {\n    novelId,\n    workspaceVersion: \"v2\",", "  const normalized: Record<string, any> = {\n    novelId,\n    workspaceVersion: \"v2\",");
 write("client/src/mobile/localRuntime.ts", localRuntime);
 write("client/src/mobile/apiAdapter.ts", apiAdapter);
 write("client/src/mobile/extensions.ts", read(".porting/mobile-local-extensions.ts"));
-write("client/src/mobile/workflowAdapter.ts", read(".porting/mobile-workflow-adapter.ts"));
+write("client/src/mobile/workflowAdapter.ts", workflowAdapter);
 write("client/src/api/client.ts", read(".porting/mobile-client.ts"));
 
 // Replace the old mobile server-address bootstrap with a local runtime marker.
