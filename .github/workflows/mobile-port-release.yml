@@ -59,6 +59,28 @@ jobs:
             --exclude '.porting' \
             --exclude '.mobile-port-ready' \
             /tmp/ai-novel-upstream/ ./
+
+          # Pre-patch the only server compatibility delta. This deliberately uses
+          # the current upstream source text and fails closed if upstream changes.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("server/src/app.ts")
+          text = p.read_text()
+          if "isCapacitorOrigin" not in text:
+              old = r'''        const isLocalhostDevOrigin = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);'''
+              new = r'''        const isLocalhostDevOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
+        const isCapacitorOrigin = /^(?:capacitor:\/\/|https?:\/\/)localhost(?::\d+)?$/.test(origin);'''
+              if old not in text:
+                  raise SystemExit("Upstream CORS rule changed; mobile compatibility patch requires review")
+              text = text.replace(old, new, 1)
+              callback_old = "        callback(null, isListedOrigin || isLocalhostDevOrigin || isLanOrigin);"
+              callback_new = "        callback(null, isListedOrigin || isLocalhostDevOrigin || isLanOrigin || isCapacitorOrigin);"
+              if callback_old not in text:
+                  raise SystemExit("Upstream CORS callback changed; mobile compatibility patch requires review")
+              text = text.replace(callback_old, callback_new, 1)
+              p.write_text(text)
+          PY
+
           node .porting/apply-mobile-port.mjs
           echo "UPSTREAM_SHA=$UPSTREAM_SHA" >> "$GITHUB_ENV"
           echo "MOBILE_VERSION=$(cat MOBILE_VERSION)" >> "$GITHUB_ENV"
@@ -85,11 +107,11 @@ jobs:
 
       - name: Stamp Android version
         shell: bash
+        env:
+          VERSION_NAME: ${{ env.MOBILE_VERSION }}
+          VERSION_CODE: 1
         run: |
           set -euo pipefail
-          VERSION_NAME="${MOBILE_VERSION}"
-          VERSION_CODE="$(date -u +%y%m%d%H%M)"
-          VERSION_CODE="${VERSION_CODE:0:9}"
           python3 - <<'PY'
           from pathlib import Path
           import os, re
@@ -99,9 +121,6 @@ jobs:
           text = re.sub(r'versionName\s+"[^"]+"', f'versionName "{os.environ["VERSION_NAME"]}"', text)
           p.write_text(text)
           PY
-        env:
-          VERSION_NAME: ${{ env.MOBILE_VERSION }}
-          VERSION_CODE: 1
 
       - name: Commit synchronized source and Android project
         shell: bash
