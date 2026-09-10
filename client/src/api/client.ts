@@ -2,6 +2,7 @@ import axios, { AxiosError } from "axios";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { API_BASE_URL, API_TIMEOUT_MS } from "@/lib/constants";
 import { toast } from "@/components/ui/toast";
+import { installDeepSeekQuickSettings, localApiAdapter } from "@/mobile/localRuntime";
 
 export interface ApiHttpError extends Error {
   status?: number;
@@ -14,10 +15,23 @@ declare module "axios" {
   }
 }
 
+const isMobileLocalRuntime =
+  typeof window !== "undefined"
+  && (window as Window & { __AI_NOVEL_RUNTIME__?: { localFirst?: boolean } }).__AI_NOVEL_RUNTIME__?.localFirst === true;
+
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: isMobileLocalRuntime ? "local://api" : API_BASE_URL,
   timeout: API_TIMEOUT_MS,
+  ...(isMobileLocalRuntime ? { adapter: localApiAdapter } : {}),
 });
+
+if (isMobileLocalRuntime && typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", installDeepSeekQuickSettings, { once: true });
+  } else {
+    installDeepSeekQuickSettings();
+  }
+}
 
 const AUTO_DISMISS_SERVER_ERROR_TOAST = {
   duration: 4000,
@@ -27,7 +41,7 @@ const AUTO_DISMISS_SERVER_ERROR_TOAST = {
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError<ApiResponse<unknown>>) => {
-    const status = error.response?.status;
+    const status = error.response?.status ?? (error as AxiosError & { status?: number }).status;
     const backendError = error.response?.data?.error;
     const backendMessage = error.response?.data?.message;
     const silentErrorStatuses = error.config?.silentErrorStatuses ?? [];
@@ -35,10 +49,10 @@ apiClient.interceptors.response.use(
     let description = backendMessage && backendMessage !== backendError ? backendMessage : undefined;
 
     if (!status) {
-      title = "网络连接失败，请检查网络后重试。";
-      description = undefined;
+      title = isMobileLocalRuntime ? "本地执行失败，请检查 DeepSeek API Key 或网络连接。" : "网络连接失败，请检查网络后重试。";
+      description = isMobileLocalRuntime ? error.message : undefined;
     } else if (status >= 500) {
-      title = backendError ?? "服务器错误，请稍后重试。";
+      title = backendError ?? (isMobileLocalRuntime ? "本地工作流执行失败。" : "服务器错误，请稍后重试。");
       description = backendMessage && backendMessage !== title ? backendMessage : undefined;
     }
 
