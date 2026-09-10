@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="apple-touch-icon" sizes="128x128" href="/apple-touch-icon.png" />
+    <title>AI 小说创作工作台 | AI Novel Production Engine</title>
+    <!-- AI-NOVEL-APP mobile runtime adapter: start -->
+    <script>
+      (() => {
+        if ("%VITE_MOBILE_BUILD%" !== "true") return;
+        const STORAGE_KEY = "ai-novel.mobile.apiBaseUrl";
+        const normalize = (value) => {
+          const trimmed = String(value || "").trim().replace(/\/$/, "");
+          if (!trimmed) return "";
+          return /\/api$/i.test(trimmed) ? trimmed : trimmed + "/api";
+        };
+        let apiBaseUrl = normalize(localStorage.getItem(STORAGE_KEY));
+        if (!apiBaseUrl) {
+          const entered = window.prompt(
+            "首次运行需要连接 AI Novel 服务端。\n请输入服务端地址，例如：http://192.168.1.10:3000\n（模拟器可用 http://10.0.2.2:3000）",
+            ""
+          );
+          apiBaseUrl = normalize(entered);
+          if (apiBaseUrl) localStorage.setItem(STORAGE_KEY, apiBaseUrl);
+        }
+        if (!apiBaseUrl) apiBaseUrl = "http://10.0.2.2:3000/api";
+        window.__AI_NOVEL_RUNTIME__ = {
+          ...(window.__AI_NOVEL_RUNTIME__ || {}),
+          mode: "web",
+          apiBaseUrl,
+          isPackaged: true,
+          updateChannel: "mobile"
+        };
+        window.addEventListener("DOMContentLoaded", () => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "服务器";
+          button.setAttribute("aria-label", "设置 AI Novel 服务端地址");
+          Object.assign(button.style, {
+            position: "fixed",
+            right: "12px",
+            bottom: "12px",
+            zIndex: "2147483647",
+            border: "1px solid rgba(127,127,127,.35)",
+            borderRadius: "999px",
+            padding: "8px 12px",
+            background: "rgba(15,23,42,.88)",
+            color: "#fff",
+            fontSize: "12px",
+            lineHeight: "1",
+            boxShadow: "0 4px 16px rgba(0,0,0,.18)"
+          });
+          button.addEventListener("click", () => {
+            const current = localStorage.getItem(STORAGE_KEY) || "";
+            const entered = window.prompt("AI Novel 服务端地址", current.replace(/\/api$/i, ""));
+            if (entered === null) return;
+            const next = normalize(entered);
+            if (!next) return;
+            localStorage.setItem(STORAGE_KEY, next);
+            window.location.reload();
+          });
+          document.body.appendChild(button);
+        });
+      })();
+    </script>
+    <!-- AI-NOVEL-APP mobile runtime adapter: end -->
+    <script>
+      (() => {
+        try {
+          const preference = JSON.parse(localStorage.getItem("ai-novel.theme.preference") || "null") || {};
+          const mode = preference.mode === "dark" || preference.mode === "light" || preference.mode === "system" ? preference.mode : "system";
+          const resolvedMode = mode === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : mode;
+          const palette = ["ink", "paper", "night"].includes(preference.palette) ? preference.palette : "ink";
+          const density = ["comfortable", "compact"].includes(preference.density) ? preference.density : "comfortable";
+          document.documentElement.classList.toggle("dark", resolvedMode === "dark");
+          document.documentElement.dataset.theme = palette;
+          document.documentElement.dataset.density = density;
+          document.documentElement.style.colorScheme = resolvedMode;
+        } catch {
+          // 启动阶段使用默认浅色主题，React 挂载后会继续校正偏好。
+        }
+      })();
+    </script>
+    <style>
+      :root {
+        color: #0f172a;
+        background: #ffffff;
+        font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: #ffffff;
+      }
+
+      html.dark body {
+        color: #f8fafc;
+        background: #0f172a;
+      }
+
+      .app-startup-shell {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+
+      .app-startup-content {
+        width: min(100%, 420px);
+        text-align: center;
+      }
+
+      .app-startup-spinner {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 20px;
+        border-radius: 999px;
+        border: 1px solid #e2e8f0;
+        border-top-color: #0f172a;
+        animation: app-startup-spin 0.9s linear infinite;
+      }
+
+      .app-startup-title {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.35;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      .app-startup-copy {
+        margin: 12px 0 0;
+        color: #64748b;
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      @keyframes app-startup-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="app-startup-shell">
+        <div class="app-startup-content">
+          <div class="app-startup-spinner" aria-hidden="true"></div>
+          <h1 class="app-startup-title">正在加载创作工作台</h1>
+          <p class="app-startup-copy">系统会在界面和本地创作服务准备好后自动进入。</p>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

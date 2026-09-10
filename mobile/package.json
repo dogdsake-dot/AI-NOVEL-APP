@@ -1,0 +1,19 @@
+{
+  "name": "@ai-novel/mobile",
+  "version": "0.4.19-mobile.1",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "add:android": "cap add android",
+    "sync": "cap sync android",
+    "open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/core": "^7.4.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "typescript": "^5.9.3"
+  }
+}
