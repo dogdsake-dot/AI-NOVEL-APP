@@ -11,7 +11,10 @@ const write = (p, content) => {
 
 const desktopPkg = JSON.parse(read("desktop/package.json"));
 const upstreamVersion = String(desktopPkg.version || "0.0.0");
-const mobileVersion = `${upstreamVersion}-mobile.1`;
+const mobileVersion = read(".porting/mobile-version.txt").trim();
+if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(mobileVersion)) {
+  throw new Error(`Invalid mobile version: ${mobileVersion}`);
+}
 
 // 1) Keep the upstream monorepo intact and add one mobile package.
 let workspace = read("pnpm-workspace.yaml");
