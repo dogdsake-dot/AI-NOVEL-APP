@@ -24,7 +24,10 @@ if (!html.includes("AI-NOVEL-APP local-first mobile runtime: start")) {
     `    <title>AI 小说创作工作台 | AI Novel Production Engine</title>${marker}`,
   );
 }
-html = html.replace("系统会在界面和本地创作服务准备好后自动进入。", "系统会加载本地创作数据，并在需要 AI 时直接连接 DeepSeek。\");
+html = html.replace(
+  "系统会在界面和本地创作服务准备好后自动进入。",
+  "系统会加载本地创作数据，并在需要 AI 时直接连接 DeepSeek。",
+);
 write("client/index.html", html);
 
 // Extend the global runtime declaration without changing desktop/web behavior.
