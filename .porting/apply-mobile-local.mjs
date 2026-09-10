@@ -14,7 +14,8 @@ const write = (p, content) => {
 // This keeps TypeScript/module resolution inside client/, where axios/idb-keyval are installed.
 const localRuntime = read(".porting/mobile-local-runtime.ts")
   .replace("export const localApiAdapter: AxiosAdapter = async (config) => {", "export const localApiAdapter: AxiosAdapter = async (config: any) => {")
-  .replace("const current = getDeepSeekApiKey();", "const current = getDeepSeekKey();");
+  .replace("const current = getDeepSeekApiKey();", "const current = getDeepSeekKey();")
+  .replace('thinking: { type: "enabled", reasoning_effort: "high" },', 'thinking: { type: "enabled" },\n      reasoning_effort: "high",');
 const apiAdapter = read(".porting/mobile-api-adapter.ts")
   .replace('from "./mobile-local-runtime";', 'from "./localRuntime";')
   .replace("export const mobileApiAdapter: AxiosAdapter = async (config) => {", "export const mobileApiAdapter: AxiosAdapter = async (config: any) => {");
@@ -27,8 +28,7 @@ write("client/src/api/client.ts", read(".porting/mobile-client.ts"));
 // Replace the old mobile server-address bootstrap with a local runtime marker.
 let html = read("client/index.html");
 html = html.replace(/\n\s*<!-- AI-NOVEL-APP mobile runtime adapter: start -->[\s\S]*?<!-- AI-NOVEL-APP mobile runtime adapter: end -->\n?/m, "\n");
-const marker = `\n    <!-- AI-NOVEL-APP local-first mobile runtime: start -->\n    <script>\n      (() => {\n        if (\"%VITE_MOBILE_BUILD%\" !== \"true\") return;\n        window.__AI_NOVEL_RUNTIME__ = {\n          ...(window.__AI_NOVEL_RUNTIME__ || {}),\n          mode: \"web\",\n          localFirst: true,\n          apiBaseUrl: \"local://api\",\n          isPackaged: true,
-          updateChannel: \"mobile\"\n        };\n      })();\n    </script>\n    <!-- AI-NOVEL-APP local-first mobile runtime: end -->`;
+const marker = `\n    <!-- AI-NOVEL-APP local-first mobile runtime: start -->\n    <script>\n      (() => {\n        if (\"%VITE_MOBILE_BUILD%\" !== \"true\") return;\n        window.__AI_NOVEL_RUNTIME__ = {\n          ...(window.__AI_NOVEL_RUNTIME__ || {}),\n          mode: \"web\",\n          localFirst: true,\n          apiBaseUrl: \"local://api\",\n          isPackaged: true,\n          updateChannel: \"mobile\"\n        };\n      })();\n    </script>\n    <!-- AI-NOVEL-APP local-first mobile runtime: end -->`;
 if (!html.includes("AI-NOVEL-APP local-first mobile runtime: start")) {
   html = html.replace(
     "    <title>AI 小说创作工作台 | AI Novel Production Engine</title>",
