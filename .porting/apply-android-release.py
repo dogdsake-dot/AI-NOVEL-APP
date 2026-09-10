@@ -18,6 +18,9 @@ text = build_gradle.read_text()
 text = re.sub(r'versionCode\s+\d+', f'versionCode {VERSION_CODE}', text)
 text = re.sub(r'versionName\s+"[^"]+"', f'versionName "{VERSION}"', text)
 
+# Remove the malformed self-reference produced by the first v0.2.0 draft.
+text = text.replace("        release {\n            signingConfig signingConfigs.release\n            def storePath", "        release {\n            def storePath")
+
 if "AI_NOVEL_RELEASE_STORE_FILE" not in text:
     signing = '''    signingConfigs {
         release {
@@ -39,7 +42,17 @@ if "AI_NOVEL_RELEASE_STORE_FILE" not in text:
     }
 '''
     text = text.replace("    buildTypes {\n", signing + "    buildTypes {\n", 1)
-    text = text.replace("        release {\n", "        release {\n            signingConfig signingConfigs.release\n", 1)
+
+# signingConfig belongs to buildTypes.release, never inside signingConfigs.release.
+build_type_marker = "    buildTypes {\n        release {\n"
+if build_type_marker not in text:
+    raise SystemExit("Could not locate buildTypes.release in generated Gradle file")
+if "    buildTypes {\n        release {\n            signingConfig signingConfigs.release\n" not in text:
+    text = text.replace(
+        build_type_marker,
+        "    buildTypes {\n        release {\n            signingConfig signingConfigs.release\n",
+        1,
+    )
 
 build_gradle.write_text(text)
 
@@ -69,20 +82,7 @@ for p in (values, drawable, v31, adaptive):
 </resources>
 ''')
 
-(drawable / "ai_novel_launcher_foreground.xml").write_text('''<?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#EEE9DA" android:pathData="M20,39 C31,34 42,35 52,41 L52,76 C42,70 31,69 20,73 Z"/>
-    <path android:fillColor="#D9D2C4" android:pathData="M88,39 C77,34 66,35 56,41 L56,76 C66,70 77,69 88,73 Z"/>
-    <path android:fillColor="#57D7D0" android:pathData="M54,23 C47,31 46,38 50,44 C53,48 55,51 54,56 C53,61 49,65 45,68 C54,67 61,62 63,55 C65,49 61,45 58,41 C55,37 56,33 59,29 C60,26 59,24 54,23 Z"/>
-    <path android:fillColor="#8B6CFF" android:pathData="M47,57 C40,59 36,63 36,68 C35,72 37,76 42,78 C41,74 43,71 46,69 C50,66 51,62 47,57 Z"/>
-    <path android:fillColor="#8B6CFF" android:pathData="M61,57 C68,59 72,63 72,68 C73,72 71,76 66,78 C67,74 65,71 62,69 C58,66 57,62 61,57 Z"/>
-    <path android:fillColor="#F5F0E7" android:pathData="M52,28 A2,2 0,1 0,56 28 A2,2 0,1 0,52 28"/>
-</vector>
-''')
-
-(drawable / "ai_novel_logo.xml").write_text('''<?xml version="1.0" encoding="utf-8"?>
+logo_vector = '''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="144dp" android:height="144dp"
     android:viewportWidth="108" android:viewportHeight="108">
@@ -91,8 +91,13 @@ for p in (values, drawable, v31, adaptive):
     <path android:fillColor="#57D7D0" android:pathData="M54,23 C47,31 46,38 50,44 C53,48 55,51 54,56 C53,61 49,65 45,68 C54,67 61,62 63,55 C65,49 61,45 58,41 C55,37 56,33 59,29 C60,26 59,24 54,23 Z"/>
     <path android:fillColor="#8B6CFF" android:pathData="M47,57 C40,59 36,63 36,68 C35,72 37,76 42,78 C41,74 43,71 46,69 C50,66 51,62 47,57 Z"/>
     <path android:fillColor="#8B6CFF" android:pathData="M61,57 C68,59 72,63 72,68 C73,72 71,76 66,78 C67,74 65,71 62,69 C58,66 57,62 61,57 Z"/>
+    <path android:fillColor="#F5F0E7" android:pathData="M52,28 A2,2 0,1 0,56 28 A2,2 0,1 0,52 28"/>
 </vector>
-''')
+'''
+(drawable / "ai_novel_logo.xml").write_text(logo_vector)
+(drawable / "ai_novel_launcher_foreground.xml").write_text(
+    logo_vector.replace('android:width="144dp" android:height="144dp"', 'android:width="108dp" android:height="108dp"')
+)
 
 (drawable / "splash.xml").write_text('''<?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
@@ -135,7 +140,12 @@ adaptive_xml = '''<?xml version="1.0" encoding="utf-8"?>
 
 manifest = ANDROID_APP / "src/main/AndroidManifest.xml"
 manifest_text = manifest.read_text()
-manifest_text = manifest_text.replace('android:allowBackup="true"', 'android:allowBackup="true"\n        android:fullBackupContent="false"')
+if 'android:fullBackupContent="false"' not in manifest_text:
+    manifest_text = manifest_text.replace(
+        'android:allowBackup="true"',
+        'android:allowBackup="true"\n        android:fullBackupContent="false"',
+        1,
+    )
 manifest.write_text(manifest_text)
 
 print(f"Applied Android v{VERSION} release configuration; versionCode={VERSION_CODE}")
