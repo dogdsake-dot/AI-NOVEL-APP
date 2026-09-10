@@ -1,5 +1,5 @@
 <!-- AI-NOVEL-APP-MOBILE-NOTICE:START -->
-> **AI-NOVEL-APP Android port** — This repository tracks and vendors the upstream AI Novel Writing Assistant source, preserving upstream features while adding an Android Capacitor shell. Current synchronized upstream desktop version: **0.4.19**. Android release line: **0.4.19-mobile.1**. See [PORTING.md](./PORTING.md).
+> **AI-NOVEL-APP Android port** — This repository tracks and vendors the upstream AI Novel Writing Assistant source, preserving upstream features while adding an Android Capacitor shell. Current synchronized upstream desktop version: **0.4.19**. Android release line: **0.1.0**. See [PORTING.md](./PORTING.md).
 <!-- AI-NOVEL-APP-MOBILE-NOTICE:END -->
 
 # AI 小说创作工作台 / AI Novel Production Engine
