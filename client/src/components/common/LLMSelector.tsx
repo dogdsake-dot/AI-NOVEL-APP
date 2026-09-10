@@ -121,12 +121,9 @@ export default function LLMSelector({
     },
   });
 
-  const isMobileDeepSeekOnly = import.meta.env.VITE_MOBILE_BUILD === "true";
   const providerConfigs = useMemo(
-    () => (apiKeySettingsQuery.data?.data ?? []).filter((item) =>
-      isRunnableProviderConfig(item) && (!isMobileDeepSeekOnly || item.provider === "deepseek"),
-    ),
-    [apiKeySettingsQuery.data?.data, isMobileDeepSeekOnly],
+    () => (apiKeySettingsQuery.data?.data ?? []).filter(isRunnableProviderConfig),
+    [apiKeySettingsQuery.data?.data],
   );
 
   const providerOptions = useMemo(

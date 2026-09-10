@@ -76,11 +76,6 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [customModelsMessage, setCustomModelsMessage] = useState("");
   const [showAllProviderChoices, setShowAllProviderChoices] = useState(false);
-  const isMobileDeepSeekOnly = import.meta.env.VITE_MOBILE_BUILD === "true";
-  const availableProviders = useMemo(() => {
-    const providers = props.status?.providers ?? [];
-    return isMobileDeepSeekOnly ? providers.filter((provider) => provider.id === "deepseek") : providers;
-  }, [isMobileDeepSeekOnly, props.status?.providers]);
 
   useEffect(() => {
     if (props.open && props.forceConfiguration) {
@@ -89,19 +84,19 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
   }, [props.forceConfiguration, props.open]);
 
   const selectedProvider = useMemo(
-    () => availableProviders.find((provider) => provider.id === form.provider) ?? null,
-    [availableProviders, form.provider],
+    () => props.status?.providers.find((provider) => provider.id === form.provider) ?? null,
+    [form.provider, props.status?.providers],
   );
   const recommendedProvider = useMemo(
-    () => availableProviders.find((provider) => provider.id === (isMobileDeepSeekOnly ? "deepseek" : props.status?.selectedProvider))
-      ?? availableProviders.find((provider) => provider.id === "deepseek")
-      ?? availableProviders[0]
+    () => props.status?.providers.find((provider) => provider.id === props.status?.selectedProvider)
+      ?? props.status?.providers.find((provider) => provider.id === "deepseek")
+      ?? props.status?.providers[0]
       ?? null,
-    [availableProviders, isMobileDeepSeekOnly, props.status?.selectedProvider],
+    [props.status?.providers, props.status?.selectedProvider],
   );
   const preferredProvider = selectedProvider ?? recommendedProvider;
   const providerChoices: QuickSetupProviderOption[] = showAllProviderChoices
-    ? availableProviders
+    ? props.status?.providers ?? []
     : preferredProvider ? [preferredProvider] : [];
   const modelOptions = form.providerKind === "custom"
     ? customModels
@@ -117,10 +112,10 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
       return;
     }
     if (!props.status) return;
-    const preferred = availableProviders.find(
-      (provider) => provider.id === (isMobileDeepSeekOnly ? "deepseek" : props.status?.selectedProvider),
-    ) ?? availableProviders.find((provider) => provider.id === "deepseek")
-      ?? availableProviders[0];
+    const preferred = props.status.providers.find(
+      (provider) => provider.id === props.status?.selectedProvider,
+    ) ?? props.status.providers.find((provider) => provider.id === "deepseek")
+      ?? props.status.providers[0];
     if (!preferred) return;
     setForm({
       providerKind: preferred.kind,
@@ -130,7 +125,7 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
       baseURL: preferred.currentBaseURL || preferred.defaultBaseURL,
       model: preferred.currentModel || preferred.defaultModel,
     });
-  }, [availableProviders, form.provider, form.providerKind, isMobileDeepSeekOnly, props.open, props.status]);
+  }, [form.provider, form.providerKind, props.open, props.status]);
 
   const completeMutation = useMutation({
     mutationFn: (payload: CompleteQuickSetupRequest) => completeQuickSetup(payload),
@@ -348,7 +343,7 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
                 <div className="mt-3 text-xs text-muted-foreground">推荐模型：{provider.currentModel || provider.defaultModel}</div>
               </button>
               ))}
-              {!isMobileDeepSeekOnly && !showAllProviderChoices ? (
+              {!showAllProviderChoices ? (
                 <button
                   type="button"
                   className="rounded-xl border border-dashed p-4 text-left transition hover:border-primary/50 hover:bg-primary/5"
@@ -358,19 +353,17 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
                   <div className="mt-2 text-xs leading-5 text-muted-foreground">选择你已有账号的厂商，再继续填写连接信息。</div>
                 </button>
               ) : null}
-              {!isMobileDeepSeekOnly ? (
-                <button
-                  type="button"
-                  className={cn(
-                    "rounded-xl border border-dashed p-4 text-left transition hover:border-primary/50 hover:bg-primary/5",
-                    form.providerKind === "custom" && !form.provider && "border-primary bg-primary/5 ring-1 ring-primary/20",
-                  )}
-                  onClick={() => chooseCustom(true)}
-                >
-                  <div className="flex items-center gap-2 font-semibold"><ServerCog className="h-4 w-4" /> 添加第三方厂商 <ArrowRight className="h-4 w-4" /></div>
-                  <div className="mt-2 text-xs leading-5 text-muted-foreground">新增一份独立的厂商配置，适合中转服务、本地网关或 OpenAI 兼容接口。</div>
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className={cn(
+                  "rounded-xl border border-dashed p-4 text-left transition hover:border-primary/50 hover:bg-primary/5",
+                  form.providerKind === "custom" && !form.provider && "border-primary bg-primary/5 ring-1 ring-primary/20",
+                )}
+                onClick={() => chooseCustom(true)}
+              >
+                <div className="flex items-center gap-2 font-semibold"><ServerCog className="h-4 w-4" /> 添加第三方厂商 <ArrowRight className="h-4 w-4" /></div>
+                <div className="mt-2 text-xs leading-5 text-muted-foreground">新增一份独立的厂商配置，适合中转服务、本地网关或 OpenAI 兼容接口。</div>
+              </button>
             </div>
             {showAllProviderChoices ? (
               <Button type="button" variant="ghost" size="sm" onClick={() => setShowAllProviderChoices(false)}>

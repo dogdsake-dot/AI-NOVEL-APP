@@ -77,9 +77,7 @@ apiClient.interceptors.response.use(
 
     const message = description ? `${title} ${description}` : title;
 
-    const normalizedError = new Error(
-      message,
-    ) as ApiHttpError;
+    const normalizedError = new Error(message) as ApiHttpError;
     normalizedError.status = status;
     normalizedError.details = error.response?.data;
     return Promise.reject(normalizedError);

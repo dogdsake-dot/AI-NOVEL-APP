@@ -1,18 +1,18 @@
-# AI-NOVEL-APP Android wrapper
+# AI-NOVEL-APP Android
 
-This package is a thin Capacitor Android shell around the upstream React client. The upstream Express/Prisma/LangGraph/RAG server remains unchanged except for allowing the Capacitor localhost origin.
+Android is now a local-first build of the upstream AI Novel Production Engine UI. It does not ask for or connect to an AI-NOVEL server address.
 
-## Runtime model
+## Runtime
 
-- Android APK: packaged upstream React client.
-- Server: original `server/` application, running on a PC/server reachable by the phone.
-- First launch: enter the server root URL, for example `http://192.168.1.10:3000`. The app stores it locally and appends `/api`.
-- The floating **服务器** button lets you change the endpoint later.
+- UI: upstream React client, preserved as the primary product surface.
+- Local data: stored in the app WebView IndexedDB.
+- AI: direct DeepSeek API calls from the packaged app.
+- Provider scope: DeepSeek only on Android.
+- Models: deepseek-v4-pro and deepseek-v4-flash.
+- Configuration: enter the DeepSeek API Key in the mobile DeepSeek control/settings.
 
-## LAN server example
-
-Use the upstream server configuration with `HOST=0.0.0.0` and `ALLOW_LAN=true`. Keep the phone and the server on the same network. For public deployment, follow the upstream security guidance and use HTTPS.
+The upstream server source remains vendored for desktop/upstream parity, but the Android runtime does not depend on that server.
 
 ## License
 
-The copied and modified upstream code remains under AGPL-3.0-only. See the repository `LICENSE` and `PORTING.md`.
+Modified upstream code remains AGPL-3.0-only. See LICENSE and PORTING.md.

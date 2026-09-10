@@ -10,7 +10,7 @@ const STRUCTURED_FALLBACK_MAX_TOKENS_KEY = "structuredFallback.maxTokens";
 const DEFAULT_STRUCTURED_FALLBACK_SETTINGS: StructuredFallbackSettings = {
   enabled: false,
   provider: "deepseek",
-  model: "deepseek-v4-flash",
+  model: "deepseek-chat",
   temperature: 0.2,
   maxTokens: null,
 };
@@ -40,11 +40,7 @@ function normalizeProvider(value: string | undefined | null): LLMProvider {
 }
 
 function normalizeModel(value: string | undefined | null): string {
-  const normalized = value?.trim();
-  if (normalized === "deepseek-chat" || normalized === "deepseek-reasoner") {
-    return "deepseek-v4-flash";
-  }
-  return normalized || DEFAULT_STRUCTURED_FALLBACK_SETTINGS.model;
+  return value?.trim() || DEFAULT_STRUCTURED_FALLBACK_SETTINGS.model;
 }
 
 function clampTemperature(value: number | undefined | null): number {
