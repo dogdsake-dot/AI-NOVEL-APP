@@ -1,0 +1,160 @@
+name: Sync upstream, build Android, publish release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .mobile-port-ready
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-novel-mobile-release
+  cancel-in-progress: false
+
+jobs:
+  sync-build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout mobile port repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.0
+          run_install: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Synchronize upstream source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/ai-novel-upstream
+          git clone --depth 1 https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant.git /tmp/ai-novel-upstream
+          UPSTREAM_SHA="$(git -C /tmp/ai-novel-upstream rev-parse HEAD)"
+          echo "$UPSTREAM_SHA" > .porting/UPSTREAM_COMMIT
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.porting' \
+            --exclude '.mobile-port-ready' \
+            /tmp/ai-novel-upstream/ ./
+          node .porting/apply-mobile-port.mjs
+          echo "UPSTREAM_SHA=$UPSTREAM_SHA" >> "$GITHUB_ENV"
+          echo "MOBILE_VERSION=$(cat MOBILE_VERSION)" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build upstream client for Android
+        env:
+          AI_NOVEL_CLIENT_BASE: relative
+          VITE_MOBILE_BUILD: "true"
+        run: |
+          pnpm --filter @ai-novel/shared build
+          pnpm --filter @ai-novel/client build
+
+      - name: Generate and sync Capacitor Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d mobile/android ]; then
+            pnpm --dir mobile exec cap add android
+          fi
+          pnpm --dir mobile exec cap sync android
+
+      - name: Stamp Android version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_NAME="${MOBILE_VERSION}"
+          VERSION_CODE="$(date -u +%y%m%d%H%M)"
+          VERSION_CODE="${VERSION_CODE:0:9}"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          p = Path('mobile/android/app/build.gradle')
+          text = p.read_text()
+          text = re.sub(r'versionCode\s+\d+', f'versionCode {int(os.environ["VERSION_CODE"])}', text)
+          text = re.sub(r'versionName\s+"[^"]+"', f'versionName "{os.environ["VERSION_NAME"]}"', text)
+          p.write_text(text)
+          PY
+        env:
+          VERSION_NAME: ${{ env.MOBILE_VERSION }}
+          VERSION_CODE: 1
+
+      - name: Commit synchronized source and Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync upstream ${UPSTREAM_SHA} and apply Android port ${MOBILE_VERSION}"
+            git push origin HEAD:main
+          fi
+
+      - name: Build installable Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd mobile/android
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+          cd ../..
+          mkdir -p dist
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "dist/AI-NOVEL-APP-${MOBILE_VERSION}.apk"
+          sha256sum "dist/AI-NOVEL-APP-${MOBILE_VERSION}.apk" > "dist/AI-NOVEL-APP-${MOBILE_VERSION}.apk.sha256"
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          cat > dist/RELEASE_NOTES.md <<EOF
+          # AI-NOVEL-APP ${MOBILE_VERSION}
+
+          Android port synchronized from upstream AI Novel Writing Assistant.
+
+          - Upstream repository: ExplosiveCoderflome/AI-Novel-Writing-Assistant
+          - Upstream commit: ${UPSTREAM_SHA}
+          - Upstream desktop version: ${MOBILE_VERSION%-mobile.1}
+          - Android port version: ${MOBILE_VERSION}
+          - Packaging: Capacitor Android
+          - APK signing: Android debug signing key (installable test release)
+
+          The APK preserves the upstream React client and connects to the original upstream Express/Prisma/LangGraph/RAG server. On first launch, enter the reachable server address, e.g. http://192.168.1.10:3000. See PORTING.md and mobile/README.md.
+
+          License: AGPL-3.0-only. The original LICENSE and attribution are retained. The upstream license additionally states that service-style commercial/SaaS/hosted use requires separate commercial authorization from the maintainer.
+          EOF
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.MOBILE_VERSION }}
+          name: AI-NOVEL-APP v${{ env.MOBILE_VERSION }}
+          body_path: dist/RELEASE_NOTES.md
+          prerelease: true
+          generate_release_notes: false
+          files: |
+            dist/AI-NOVEL-APP-${{ env.MOBILE_VERSION }}.apk
+            dist/AI-NOVEL-APP-${{ env.MOBILE_VERSION }}.apk.sha256
