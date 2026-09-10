@@ -35,13 +35,16 @@ if "AI_NOVEL_RELEASE_STORE_FILE" not in text:
                 keyPassword keyPass
                 v1SigningEnabled true
                 v2SigningEnabled true
-                v3SigningEnabled true
-                v4SigningEnabled true
             }
         }
     }
 '''
     text = text.replace("    buildTypes {\n", signing + "    buildTypes {\n", 1)
+
+# AGP 8.x no longer exposes v3SigningEnabled()/v4SigningEnabled() as Groovy DSL
+# methods. Strip them if they survive from an older generated Android project.
+text = text.replace("                v3SigningEnabled true\n", "")
+text = text.replace("                v4SigningEnabled true\n", "")
 
 # signingConfig belongs to buildTypes.release, never inside signingConfigs.release.
 build_type_marker = "    buildTypes {\n        release {\n"
