@@ -20,6 +20,7 @@ const apiAdapter = read(".porting/mobile-api-adapter.ts")
   .replace("export const mobileApiAdapter: AxiosAdapter = async (config) => {", "export const mobileApiAdapter: AxiosAdapter = async (config: any) => {");
 write("client/src/mobile/localRuntime.ts", localRuntime);
 write("client/src/mobile/apiAdapter.ts", apiAdapter);
+write("client/src/mobile/extensions.ts", read(".porting/mobile-local-extensions.ts"));
 write("client/src/api/client.ts", read(".porting/mobile-client.ts"));
 
 // Replace the old mobile server-address bootstrap with a local runtime marker.
