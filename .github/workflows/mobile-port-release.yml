@@ -1,102 +1,95 @@
-name: Sync upstream, build Android, publish release
+name: Mobile Android release
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - .mobile-port-ready
-  workflow_dispatch:
 
 permissions:
   contents: write
 
-concurrency:
-  group: ai-novel-mobile-release
-  cancel-in-progress: false
-
 jobs:
-  sync-build-release:
+  android:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-
     steps:
-      - name: Checkout mobile port repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Node.js
+      - name: Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
-      - name: Set up pnpm
+      - name: pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.6.0
+          version: '10.6.0'
           run_install: false
 
-      - name: Set up Java
+      - name: Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: '21'
 
-      - name: Set up Android SDK
+      - name: Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Synchronize upstream source
+      - name: Sync upstream and apply mobile overlay
         shell: bash
         run: |
           set -euo pipefail
           rm -rf /tmp/ai-novel-upstream
           git clone --depth 1 https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant.git /tmp/ai-novel-upstream
           UPSTREAM_SHA="$(git -C /tmp/ai-novel-upstream rev-parse HEAD)"
-          echo "$UPSTREAM_SHA" > .porting/UPSTREAM_COMMIT
+          printf '%s\n' "$UPSTREAM_SHA" > .porting/UPSTREAM_COMMIT
+
           rsync -a --delete \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude '.porting' \
-            --exclude '.mobile-port-ready' \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude=.porting \
+            --exclude=.mobile-port-ready \
             /tmp/ai-novel-upstream/ ./
 
-          # Pre-patch the only server compatibility delta. This deliberately uses
-          # the current upstream source text and fails closed if upstream changes.
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("server/src/app.ts")
+          p = Path('server/src/app.ts')
           text = p.read_text()
-          if "isCapacitorOrigin" not in text:
-              old = r'''        const isLocalhostDevOrigin = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);'''
-              new = r'''        const isLocalhostDevOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
-        const isCapacitorOrigin = /^(?:capacitor:\/\/|https?:\/\/)localhost(?::\d+)?$/.test(origin);'''
+          if 'isCapacitorOrigin' not in text:
+              old = '        const isLocalhostDevOrigin = /^http:\\/\\/(localhost|127\\.0\\.0\\.1):\\d+$/.test(origin);'
+              new = '        const isLocalhostDevOrigin = /^https?:\\/\\/(localhost|127\\.0\\.0\\.1)(?::\\d+)?$/.test(origin);\n        const isCapacitorOrigin = /^(?:capacitor:\\/\\/|https?:\\/\\/)localhost(?::\\d+)?$/.test(origin);'
               if old not in text:
-                  raise SystemExit("Upstream CORS rule changed; mobile compatibility patch requires review")
+                  raise SystemExit('Upstream CORS rule changed; review mobile patch')
               text = text.replace(old, new, 1)
-              callback_old = "        callback(null, isListedOrigin || isLocalhostDevOrigin || isLanOrigin);"
-              callback_new = "        callback(null, isListedOrigin || isLocalhostDevOrigin || isLanOrigin || isCapacitorOrigin);"
-              if callback_old not in text:
-                  raise SystemExit("Upstream CORS callback changed; mobile compatibility patch requires review")
-              text = text.replace(callback_old, callback_new, 1)
+              old_cb = '        callback(null, isListedOrigin || isLocalhostDevOrigin || isLanOrigin);'
+              new_cb = '        callback(null, isListedOrigin || isLocalhostDevOrigin || isLanOrigin || isCapacitorOrigin);'
+              if old_cb not in text:
+                  raise SystemExit('Upstream CORS callback changed; review mobile patch')
+              text = text.replace(old_cb, new_cb, 1)
               p.write_text(text)
           PY
 
           node .porting/apply-mobile-port.mjs
-          echo "UPSTREAM_SHA=$UPSTREAM_SHA" >> "$GITHUB_ENV"
-          echo "MOBILE_VERSION=$(cat MOBILE_VERSION)" >> "$GITHUB_ENV"
+          printf 'UPSTREAM_SHA=%s\n' "$UPSTREAM_SHA" >> "$GITHUB_ENV"
+          printf 'MOBILE_VERSION=%s\n' "$(cat MOBILE_VERSION)" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build upstream client for Android
-        env:
-          AI_NOVEL_CLIENT_BASE: relative
-          VITE_MOBILE_BUILD: "true"
+      - name: Build original React client
+        shell: bash
         run: |
+          set -euo pipefail
           pnpm --filter @ai-novel/shared build
-          pnpm --filter @ai-novel/client build
+          AI_NOVEL_CLIENT_BASE=relative VITE_MOBILE_BUILD=true pnpm --filter @ai-novel/client build
 
-      - name: Generate and sync Capacitor Android project
+      - name: Generate Android project
         shell: bash
         run: |
           set -euo pipefail
@@ -104,37 +97,29 @@ jobs:
             pnpm --dir mobile exec cap add android
           fi
           pnpm --dir mobile exec cap sync android
-
-      - name: Stamp Android version
-        shell: bash
-        env:
-          VERSION_NAME: ${{ env.MOBILE_VERSION }}
-          VERSION_CODE: 1
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import os, re
           p = Path('mobile/android/app/build.gradle')
           text = p.read_text()
-          text = re.sub(r'versionCode\s+\d+', f'versionCode {int(os.environ["VERSION_CODE"])}', text)
-          text = re.sub(r'versionName\s+"[^"]+"', f'versionName "{os.environ["VERSION_NAME"]}"', text)
+          text = re.sub(r'versionCode\s+\d+', 'versionCode 1', text)
+          text = re.sub(r'versionName\s+"[^"]+"', 'versionName "' + os.environ['MOBILE_VERSION'] + '"', text)
           p.write_text(text)
           PY
 
-      - name: Commit synchronized source and Android project
+      - name: Commit synchronized source
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "chore: sync upstream ${UPSTREAM_SHA} and apply Android port ${MOBILE_VERSION}"
+            git commit -m "chore: sync upstream $UPSTREAM_SHA and Android port $MOBILE_VERSION"
             git push origin HEAD:main
           fi
 
-      - name: Build installable Android APK
+      - name: Build APK
         shell: bash
         run: |
           set -euo pipefail
@@ -143,37 +128,21 @@ jobs:
           ./gradlew assembleDebug --stacktrace
           cd ../..
           mkdir -p dist
-          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "dist/AI-NOVEL-APP-${MOBILE_VERSION}.apk"
-          sha256sum "dist/AI-NOVEL-APP-${MOBILE_VERSION}.apk" > "dist/AI-NOVEL-APP-${MOBILE_VERSION}.apk.sha256"
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk"
+          sha256sum "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk" > "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk.sha256"
 
-      - name: Prepare release notes
+      - name: Publish GitHub prerelease
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cat > dist/RELEASE_NOTES.md <<EOF
-          # AI-NOVEL-APP ${MOBILE_VERSION}
-
-          Android port synchronized from upstream AI Novel Writing Assistant.
-
-          - Upstream repository: ExplosiveCoderflome/AI-Novel-Writing-Assistant
-          - Upstream commit: ${UPSTREAM_SHA}
-          - Upstream desktop version: ${MOBILE_VERSION%-mobile.1}
-          - Android port version: ${MOBILE_VERSION}
-          - Packaging: Capacitor Android
-          - APK signing: Android debug signing key (installable test release)
-
-          The APK preserves the upstream React client and connects to the original upstream Express/Prisma/LangGraph/RAG server. On first launch, enter the reachable server address, e.g. http://192.168.1.10:3000. See PORTING.md and mobile/README.md.
-
-          License: AGPL-3.0-only. The original LICENSE and attribution are retained. The upstream license additionally states that service-style commercial/SaaS/hosted use requires separate commercial authorization from the maintainer.
-          EOF
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ env.MOBILE_VERSION }}
-          name: AI-NOVEL-APP v${{ env.MOBILE_VERSION }}
-          body_path: dist/RELEASE_NOTES.md
-          prerelease: true
-          generate_release_notes: false
-          files: |
-            dist/AI-NOVEL-APP-${{ env.MOBILE_VERSION }}.apk
-            dist/AI-NOVEL-APP-${{ env.MOBILE_VERSION }}.apk.sha256
+          set -euo pipefail
+          TAG="v$MOBILE_VERSION"
+          NOTES="Android mobile port of ExplosiveCoderflome/AI-Novel-Writing-Assistant. Upstream commit: $UPSTREAM_SHA. Core React/Express/Prisma/LangGraph/RAG functionality is retained; Electron-only Windows shell features are excluded. The APK connects to the original server over LAN/HTTPS. License: AGPL-3.0-only. This is a debug-signed installable test prerelease."
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk" \
+            "dist/AI-NOVEL-APP-$MOBILE_VERSION.apk.sha256" \
+            --title "AI-NOVEL-APP $TAG" \
+            --notes "$NOTES" \
+            --prerelease
