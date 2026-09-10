@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "tsc -p tsconfig.json --noEmit && vite build && bash ../.porting/smoke-mobile-web.sh",
     "build:desktop": "tsc -p tsconfig.json --noEmit && node scripts/build-desktop.mjs",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.js src/**/*.test.mjs",

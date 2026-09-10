@@ -19,6 +19,24 @@
           isPackaged: true,
           updateChannel: "mobile"
         };
+        const reportFatal = (reason) => {
+          window.setTimeout(() => {
+            const root = document.getElementById("root");
+            if (!root || root.textContent?.trim()) return;
+            root.replaceChildren();
+            const box = document.createElement("div");
+            box.style.cssText = "min-height:100vh;padding:32px;background:#090b16;color:#f3f4f6;font-family:sans-serif";
+            const title = document.createElement("h1");
+            title.textContent = "AI Novel 启动失败";
+            const detail = document.createElement("pre");
+            detail.style.cssText = "white-space:pre-wrap;word-break:break-word;margin-top:16px;padding:12px;background:#020617;border-radius:10px;font-size:12px";
+            detail.textContent = reason instanceof Error ? (reason.stack || reason.message) : String(reason || "Unknown startup error");
+            box.append(title, detail);
+            root.append(box);
+          }, 0);
+        };
+        window.addEventListener("error", (event) => reportFatal(event.error || event.message));
+        window.addEventListener("unhandledrejection", (event) => reportFatal(event.reason));
       })();
     </script>
     <!-- AI-NOVEL-APP local-first mobile runtime: end -->

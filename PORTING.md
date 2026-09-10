@@ -2,7 +2,7 @@
 
 - Upstream: https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant
 - Upstream desktop version at sync time: 0.4.19
-- Mobile port version: 0.2.1
+- Mobile port version: 0.2.2
 - Strategy: preserve the upstream product UI and API surface while replacing Android's remote server dependency with an in-app local compatibility runtime plus direct DeepSeek API execution.
 
 ## What is preserved
@@ -11,7 +11,7 @@ The original React client, Express server, Prisma database layer, LangChain/Lang
 
 ## Mobile-specific differences
 
-Android is local-first: no server address is requested and the app does not require the upstream Express service at runtime. CRUD/project state, core novel workflow state, and Creation Studio task state are persisted locally; AI-oriented API calls are handled by the DeepSeek-only mobile adapter over Capacitor native HTTP. The desktop/server source is still retained in the repository for upstream parity and non-Android builds. Electron-only capabilities remain desktop-only.
+Android is local-first: no server address is requested and the app does not require the upstream Express service at runtime. CRUD/project state, core novel workflow state, and Creation Studio task state are persisted locally; AI-oriented API calls are handled by the DeepSeek-only mobile adapter over Capacitor native HTTP. Packaged routing uses HashRouter and startup failures are surfaced visibly instead of producing a silent white screen. The desktop/server source is still retained in the repository for upstream parity and non-Android builds. Electron-only capabilities remain desktop-only.
 
 ## License and attribution
 
